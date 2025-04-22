@@ -105,7 +105,7 @@ app.get('/api/media_players', async (req, res) => {
 // Endpoint to control playback on a media player
 app.post('/api/play', async (req, res) => {
   try {
-    const { entity_id, url, title, artist } = req.body;
+    const { entity_id, url, title, artist, volume } = req.body;
     
     if (!entity_id) {
       return res.status(400).json({ error: 'Media player entity ID is required' });
@@ -131,10 +131,91 @@ app.post('/api/play', async (req, res) => {
       },
     });
     
+    // Set volume if provided
+    if (volume !== undefined) {
+      await axios.post('http://supervisor/core/api/services/media_player/volume_set', {
+        entity_id,
+        volume_level: volume
+      }, {
+        headers: {
+          Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
+    
     res.json({ success: true });
   } catch (error) {
     console.error('Error playing media:', error);
     res.status(500).json({ error: 'Failed to play media' });
+  }
+});
+
+// Endpoint to control media playback (play/pause/stop)
+app.post('/api/media_control', async (req, res) => {
+  try {
+    const { entity_id, action } = req.body;
+    
+    if (!entity_id) {
+      return res.status(400).json({ error: 'Media player entity ID is required' });
+    }
+    
+    if (!['play', 'pause', 'stop'].includes(action)) {
+      return res.status(400).json({ error: 'Invalid action. Must be play, pause, or stop' });
+    }
+    
+    // Map actions to Home Assistant services
+    const serviceMap = {
+      play: 'media_play',
+      pause: 'media_pause',
+      stop: 'media_stop'
+    };
+    
+    const service = serviceMap[action];
+    
+    await axios.post(`http://supervisor/core/api/services/media_player/${service}`, {
+      entity_id
+    }, {
+      headers: {
+        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error controlling media:', error);
+    res.status(500).json({ error: 'Failed to control media' });
+  }
+});
+
+// Endpoint to set volume
+app.post('/api/volume', async (req, res) => {
+  try {
+    const { entity_id, volume } = req.body;
+    
+    if (!entity_id) {
+      return res.status(400).json({ error: 'Media player entity ID is required' });
+    }
+    
+    if (volume === undefined || volume < 0 || volume > 1) {
+      return res.status(400).json({ error: 'Volume must be a value between 0 and 1' });
+    }
+    
+    await axios.post('http://supervisor/core/api/services/media_player/volume_set', {
+      entity_id,
+      volume_level: volume
+    }, {
+      headers: {
+        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error setting volume:', error);
+    res.status(500).json({ error: 'Failed to set volume' });
   }
 });
 
