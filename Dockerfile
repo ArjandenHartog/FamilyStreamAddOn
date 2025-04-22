@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y \
     npm \
     x11vnc \
     supervisor \
+    ffmpeg \
+    alsa-utils \
+    pulseaudio-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up working directory
@@ -31,6 +34,9 @@ RUN chmod +x /run.sh
 # Set up virtual display and audio
 ENV DISPLAY=:99
 ENV PULSE_SERVER=unix:/tmp/pulse/native
+
+# Create directory for PulseAudio socket
+RUN mkdir -p /tmp/pulse
 
 # Expose ports
 EXPOSE 8099 5900

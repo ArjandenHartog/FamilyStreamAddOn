@@ -6,7 +6,8 @@ const compression = require('compression');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const https = require('https');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
+const fs = require('fs');
 
 const app = express();
 const port = process.env.PORT || 8099;
@@ -31,6 +32,193 @@ app.use(bodyParser.json()); // Parse JSON request bodies
 
 // Serve static files (for helper UI)
 app.use('/ha-controls', express.static(path.join(__dirname, 'public')));
+
+// Global variables to track state
+let currentFirefoxAudioStream = null;
+let streamingProcess = null;
+
+// Function to find Firefox audio stream
+async function findFirefoxAudioStream() {
+  return new Promise((resolve, reject) => {
+    exec('pactl list sink-inputs', (error, stdout, stderr) => {
+      if (error) {
+        console.error('Error getting audio streams:', error);
+        reject(error);
+        return;
+      }
+      
+      // Find Firefox audio stream in pactl output
+      const lines = stdout.split('\n');
+      let sinkInputId = null;
+      let sinkId = null;
+      let inFirefoxSection = false;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        if (line.startsWith('Sink Input #')) {
+          sinkInputId = line.match(/Sink Input #(\d+)/)[1];
+          inFirefoxSection = false;
+        }
+        
+        if (line.includes('application.name = "Firefox"') || 
+            line.includes('application.name = "firefox"') ||
+            line.includes('application.process.binary = "firefox"') ||
+            line.includes('application.process.binary = "firefox-esr"')) {
+          inFirefoxSection = true;
+        }
+        
+        if (inFirefoxSection && line.startsWith('Sink: ')) {
+          sinkId = line.match(/Sink: (\d+)/)[1];
+          // Found all the information we need
+          break;
+        }
+      }
+      
+      if (sinkInputId && inFirefoxSection) {
+        console.log(`Found Firefox audio: Sink Input #${sinkInputId}, Sink #${sinkId}`);
+        resolve({ sinkInputId, sinkId });
+      } else {
+        console.log('No Firefox audio stream found. Firefox might be silent or not playing audio.');
+        reject(new Error('No Firefox audio stream found'));
+      }
+    });
+  });
+}
+
+// Setup audio streaming using ffmpeg
+async function setupAudioStream(entityId, volume) {
+  try {
+    // Stop any existing stream
+    if (streamingProcess) {
+      streamingProcess.kill();
+      streamingProcess = null;
+    }
+    
+    // Find Firefox audio
+    const { sinkInputId, sinkId } = await findFirefoxAudioStream();
+    
+    // Create a virtual sink for Firefox audio if needed
+    // This allows us to isolate and capture Firefox audio
+    exec(`pactl load-module module-null-sink sink_name=firefox_capture sink_properties=device.description="Firefox Audio Capture"`, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Error creating virtual sink:', error);
+        return;
+      }
+      
+      const virtualSinkId = stdout.trim();
+      console.log(`Created virtual sink with ID ${virtualSinkId}`);
+      
+      // Move Firefox audio to our virtual sink
+      exec(`pactl move-sink-input ${sinkInputId} firefox_capture`, async (error, stdout, stderr) => {
+        if (error) {
+          console.error('Error moving Firefox audio to virtual sink:', error);
+          return;
+        }
+        
+        console.log('Moved Firefox audio to virtual sink');
+        
+        // Prepare HTTP stream for Home Assistant
+        const streamUrl = `http://${process.env.HOSTNAME || 'localhost'}:${port}/audio/firefox.mp3`;
+        currentFirefoxAudioStream = streamUrl;
+        
+        // Start FFmpeg to stream from our virtual sink to HTTP
+        const ffmpeg = spawn('ffmpeg', [
+          '-f', 'pulse',
+          '-i', 'firefox_capture.monitor',
+          '-acodec', 'libmp3lame',
+          '-ab', '192k',
+          '-ac', '2',
+          '-f', 'mp3',
+          '-fflags', 'nobuffer',
+          '-content_type', 'audio/mpeg',
+          'pipe:1'
+        ]);
+        
+        ffmpeg.stdout.on('data', (data) => {
+          // We'll handle this data in the audio endpoint
+          // This just sets up the stream
+        });
+        
+        ffmpeg.stderr.on('data', (data) => {
+          console.log(`FFmpeg: ${data}`);
+        });
+        
+        ffmpeg.on('close', (code) => {
+          console.log(`FFmpeg process exited with code ${code}`);
+        });
+        
+        streamingProcess = ffmpeg;
+        
+        // Send play command to Home Assistant
+        await sendPlayCommand(entityId, streamUrl, volume);
+        
+        return { success: true, url: streamUrl };
+      });
+    });
+  } catch (error) {
+    console.error('Error setting up audio stream:', error);
+    throw error;
+  }
+}
+
+// Send play command to Home Assistant
+async function sendPlayCommand(entityId, url, volume) {
+  try {
+    // Play media on Home Assistant
+    const playData = {
+      entity_id: entityId,
+      media_content_id: url,
+      media_content_type: 'music',
+      metadata: {
+        title: "FamilyStream Audio",
+        artist: "Firefox Browser"
+      }
+    };
+    
+    await axiosInstance.post('http://supervisor/core/api/services/media_player/play_media', playData, {
+      headers: {
+        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    // Set volume if provided
+    if (volume !== undefined) {
+      await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
+        entity_id: entityId,
+        volume_level: volume
+      }, {
+        headers: {
+          Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Error sending play command to Home Assistant:', error);
+    throw error;
+  }
+}
+
+// Audio stream endpoint - serves the audio as an HTTP stream
+app.get('/audio/firefox.mp3', (req, res) => {
+  if (!streamingProcess) {
+    return res.status(404).send('No audio stream available');
+  }
+  
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  
+  streamingProcess.stdout.pipe(res);
+  
+  req.on('close', () => {
+    console.log('Client disconnected from audio stream');
+  });
+});
 
 // API for HA media players
 app.get('/api/media_players', async (req, res) => {
@@ -57,52 +245,7 @@ app.get('/api/media_players', async (req, res) => {
   }
 });
 
-// Function to get Firefox audio stream URL
-async function getFirefoxAudioStream() {
-  return new Promise((resolve, reject) => {
-    exec('pactl list sink-inputs', (error, stdout, stderr) => {
-      if (error) {
-        console.error('Error getting audio streams:', error);
-        reject(error);
-        return;
-      }
-      
-      // Parse output to find Firefox audio stream
-      const lines = stdout.split('\n');
-      let sinkInput = null;
-      
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].includes('firefox') || lines[i].includes('Firefox')) {
-          // Found Firefox stream, get sink input number
-          const match = lines[i-1].match(/Sink Input #(\d+)/);
-          if (match) {
-            sinkInput = match[1];
-            break;
-          }
-        }
-      }
-      
-      if (sinkInput) {
-        resolve(`pulse://sink-input-${sinkInput}`);
-      } else {
-        reject(new Error('No Firefox audio stream found'));
-      }
-    });
-  });
-}
-
-// Endpoint to get current audio stream
-app.get('/api/current_stream', async (req, res) => {
-  try {
-    const streamUrl = await getFirefoxAudioStream();
-    res.json({ url: streamUrl });
-  } catch (error) {
-    console.error('Error getting audio stream:', error);
-    res.status(500).json({ error: 'Failed to get audio stream' });
-  }
-});
-
-// Endpoint to play audio on Home Assistant
+// Endpoint to stream Firefox audio to a Home Assistant media player
 app.post('/api/play', async (req, res) => {
   try {
     const { entity_id, volume } = req.body;
@@ -111,44 +254,15 @@ app.post('/api/play', async (req, res) => {
       return res.status(400).json({ error: 'Media player entity ID is required' });
     }
     
-    // Get Firefox audio stream
-    const streamUrl = await getFirefoxAudioStream();
-    
-    // Play on Home Assistant
-    const playData = {
-      entity_id,
-      media_content_id: streamUrl,
-      media_content_type: 'music',
-    };
-    
-    await axiosInstance.post('http://supervisor/core/api/services/media_player/play_media', playData, {
-      headers: {
-        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    
-    // Set volume if provided
-    if (volume !== undefined) {
-      await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
-        entity_id,
-        volume_level: volume
-      }, {
-        headers: {
-          Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-      });
-    }
-    
-    res.json({ success: true });
+    const result = await setupAudioStream(entity_id, volume);
+    res.json({ success: true, url: result.url });
   } catch (error) {
     console.error('Error playing media:', error);
-    res.status(500).json({ error: 'Failed to play media', details: error.message });
+    res.status(500).json({ error: 'Failed to play media' });
   }
 });
 
-// Endpoint to control media playback (play/pause/stop)
+// Endpoint to control media playback
 app.post('/api/media_control', async (req, res) => {
   try {
     const { entity_id, action } = req.body;
@@ -161,7 +275,11 @@ app.post('/api/media_control', async (req, res) => {
       return res.status(400).json({ error: 'Invalid action. Must be play, pause, or stop' });
     }
     
-    console.log(`Sending ${action} command to ${entity_id}`);
+    // If stopping, kill the FFmpeg process
+    if (action === 'stop' && streamingProcess) {
+      streamingProcess.kill();
+      streamingProcess = null;
+    }
     
     // Map actions to Home Assistant services
     const serviceMap = {
@@ -184,7 +302,7 @@ app.post('/api/media_control', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error controlling media:', error);
-    res.status(500).json({ error: 'Failed to control media', details: error.message });
+    res.status(500).json({ error: 'Failed to control media' });
   }
 });
 
@@ -201,8 +319,6 @@ app.post('/api/volume', async (req, res) => {
       return res.status(400).json({ error: 'Volume must be a value between 0 and 1' });
     }
     
-    console.log(`Setting volume to ${volume} on ${entity_id}`);
-    
     await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
       entity_id,
       volume_level: volume
@@ -216,7 +332,7 @@ app.post('/api/volume', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error setting volume:', error);
-    res.status(500).json({ error: 'Failed to set volume', details: error.message });
+    res.status(500).json({ error: 'Failed to set volume' });
   }
 });
 
