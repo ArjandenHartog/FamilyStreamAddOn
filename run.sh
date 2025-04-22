@@ -1,12 +1,10 @@
 #!/usr/bin/with-contenv bashio
 
-CONFIG_PATH=/data/options.json
-DEFAULT_MEDIA_PLAYER=$(bashio::config 'default_media_player')
+# Export Home Assistant supervisor token
+export SUPERVISOR_TOKEN=$(bashio::config 'supervisor_token')
 
-echo "Starting FamilyStream add-on..."
-echo "Default media player: $DEFAULT_MEDIA_PLAYER"
+# Export default media player if configured
+export DEFAULT_MEDIA_PLAYER=$(bashio::config 'default_media_player')
 
-# Start the Node.js application
-cd /app
-export DEFAULT_MEDIA_PLAYER=$DEFAULT_MEDIA_PLAYER
-node server.js 
+# Start supervisord which will manage all services
+exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf 

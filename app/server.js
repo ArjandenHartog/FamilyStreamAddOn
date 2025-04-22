@@ -6,6 +6,7 @@ const compression = require('compression');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const https = require('https');
+const { exec } = require('child_process');
 
 const app = express();
 const port = process.env.PORT || 8099;
@@ -52,33 +53,73 @@ app.get('/api/media_players', async (req, res) => {
     res.json(mediaPlayers);
   } catch (error) {
     console.error('Error fetching media players:', error);
-    res.status(500).json({ error: 'Failed to fetch media players', details: error.message });
+    res.status(500).json({ error: 'Failed to fetch media players' });
   }
 });
 
-// Endpoint to play media on a Home Assistant player
+// Function to get Firefox audio stream URL
+async function getFirefoxAudioStream() {
+  return new Promise((resolve, reject) => {
+    exec('pactl list sink-inputs', (error, stdout, stderr) => {
+      if (error) {
+        console.error('Error getting audio streams:', error);
+        reject(error);
+        return;
+      }
+      
+      // Parse output to find Firefox audio stream
+      const lines = stdout.split('\n');
+      let sinkInput = null;
+      
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes('firefox') || lines[i].includes('Firefox')) {
+          // Found Firefox stream, get sink input number
+          const match = lines[i-1].match(/Sink Input #(\d+)/);
+          if (match) {
+            sinkInput = match[1];
+            break;
+          }
+        }
+      }
+      
+      if (sinkInput) {
+        resolve(`pulse://sink-input-${sinkInput}`);
+      } else {
+        reject(new Error('No Firefox audio stream found'));
+      }
+    });
+  });
+}
+
+// Endpoint to get current audio stream
+app.get('/api/current_stream', async (req, res) => {
+  try {
+    const streamUrl = await getFirefoxAudioStream();
+    res.json({ url: streamUrl });
+  } catch (error) {
+    console.error('Error getting audio stream:', error);
+    res.status(500).json({ error: 'Failed to get audio stream' });
+  }
+});
+
+// Endpoint to play audio on Home Assistant
 app.post('/api/play', async (req, res) => {
   try {
-    const { entity_id, url, title, artist, volume } = req.body;
+    const { entity_id, volume } = req.body;
     
     if (!entity_id) {
       return res.status(400).json({ error: 'Media player entity ID is required' });
     }
     
-    console.log(`Playing "${title}" by "${artist}" on ${entity_id} with URL: ${url}`);
+    // Get Firefox audio stream
+    const streamUrl = await getFirefoxAudioStream();
     
+    // Play on Home Assistant
     const playData = {
       entity_id,
-      media_content_id: url,
+      media_content_id: streamUrl,
       media_content_type: 'music',
     };
-    
-    if (title) {
-      playData.metadata = {
-        title,
-        artist: artist || 'FamilyStream',
-      };
-    }
     
     await axiosInstance.post('http://supervisor/core/api/services/media_player/play_media', playData, {
       headers: {

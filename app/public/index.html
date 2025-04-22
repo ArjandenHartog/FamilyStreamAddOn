@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FamilyStream - Home Assistant Integratie</title>
+  <title>FamilyStream Audio Controls</title>
   <style>
     * {
       box-sizing: border-box;
@@ -16,12 +16,16 @@
       background-color: #f5f5f5;
       color: #333;
       line-height: 1.6;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
     }
     
     .container {
-      max-width: 1200px;
-      margin: 0 auto;
+      background: white;
       padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     
     header {
@@ -125,38 +129,29 @@
     }
     
     select, button {
-      width: 100%;
-      padding: 10px;
-      border-radius: 5px;
+      padding: 8px;
+      margin: 5px;
+      border-radius: 4px;
       border: 1px solid #ddd;
-      font-size: 14px;
-    }
-    
-    select {
-      margin-bottom: 10px;
     }
     
     button {
-      background-color: #03a9f4;
+      background: #03a9f4;
       color: white;
       border: none;
       cursor: pointer;
-      transition: background-color 0.2s;
-      margin-bottom: 10px;
     }
     
     button:hover {
-      background-color: #0288d1;
-    }
-    
-    button:disabled {
-      background-color: #b3e5fc;
-      cursor: not-allowed;
+      background: #0288d1;
     }
     
     .volume-control {
-      width: 100%;
-      margin: 10px 0;
+      margin: 20px 0;
+    }
+    
+    input[type="range"] {
+      width: 200px;
     }
     
     .now-playing {
@@ -298,506 +293,95 @@
 </head>
 <body>
   <div class="container">
-    <header>
-      <h1>FamilyStream Audio</h1>
-      <p>Stream muziek naar Home Assistant mediaspelers</p>
-    </header>
+    <h1>FamilyStream Audio Controls</h1>
     
-    <main>
-      <div class="music-browser">
-        <input type="text" class="search-box" id="search-input" placeholder="Zoek naar liedjes, albums of artiesten...">
-        
-        <div class="tabs">
-          <div class="tab active" data-tab="songs">Liedjes</div>
-          <div class="tab" data-tab="playlists">Afspeellijsten</div>
-          <div class="tab" data-tab="prayer-times">Gebedstijden</div>
-        </div>
-        
-        <div class="tabs-content">
-          <div id="songs-tab" class="active">
-            <h2 class="section-title">Populaire liedjes</h2>
-            <div class="loading">
-              <div class="loading-spinner"></div>
-              <p>Liedjes laden...</p>
-            </div>
-            <ul class="song-list" id="songs-list">
-              <!-- Songs will be loaded here -->
-            </ul>
-          </div>
-          
-          <div id="playlists-tab">
-            <h2 class="section-title">Afspeellijsten</h2>
-            <div class="loading">
-              <div class="loading-spinner"></div>
-              <p>Afspeellijsten laden...</p>
-            </div>
-            <div id="playlists-container">
-              <!-- Playlists will be loaded here -->
-            </div>
-          </div>
-          
-          <div id="prayer-times-tab">
-            <h2 class="section-title">Gebedstijden</h2>
-            <div class="loading">
-              <div class="loading-spinner"></div>
-              <p>Gebedstijden laden...</p>
-            </div>
-            <div id="prayer-times-container">
-              <!-- Prayer times will be loaded here -->
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <div class="player-controls">
-        <div class="now-playing" id="now-playing">
-          <div class="now-playing-title">Geen nummer geselecteerd</div>
-          <div class="now-playing-artist">Selecteer een nummer om af te spelen</div>
-        </div>
-        
-        <div class="control-group">
-          <label class="control-label" for="media-player-select">Selecteer mediaspeler:</label>
-          <select id="media-player-select">
-            <option value="">Kies een mediaspeler...</option>
-          </select>
-          <button id="refresh-players-btn">Ververs mediaspelers</button>
-        </div>
-        
-        <div class="control-group">
-          <label class="control-label" for="volume-control">Volume:</label>
-          <input type="range" id="volume-control" class="volume-control" min="0" max="100" value="50">
-        </div>
-        
-        <div class="control-group">
-          <button id="play-btn" disabled>▶️ Afspelen</button>
-          <button id="pause-btn" disabled>⏸️ Pauzeren</button>
-          <button id="stop-btn" disabled>⏹️ Stoppen</button>
-        </div>
-        
-        <div class="status-message" id="status-message">
-          Klaar om muziek af te spelen. Selecteer een nummer en een mediaspeler.
-        </div>
-      </div>
-    </main>
+    <div>
+      <h3>Select Media Player</h3>
+      <select id="mediaPlayer"></select>
+    </div>
+
+    <div class="volume-control">
+      <h3>Volume</h3>
+      <input type="range" id="volume" min="0" max="100" value="50">
+      <span id="volumeValue">50%</span>
+    </div>
+
+    <div>
+      <button onclick="startStreaming()">Start Streaming</button>
+      <button onclick="stopStreaming()">Stop Streaming</button>
+    </div>
   </div>
-  
+
   <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      // State
-      let currentSong = null;
-      let mediaPlayers = [];
-      let currentEntityId = '';
-      let songs = [];
-      let playlists = [];
-      
-      // Elements
-      const mediaPlayerSelect = document.getElementById('media-player-select');
-      const refreshPlayersBtn = document.getElementById('refresh-players-btn');
-      const volumeControl = document.getElementById('volume-control');
-      const playBtn = document.getElementById('play-btn');
-      const pauseBtn = document.getElementById('pause-btn');
-      const stopBtn = document.getElementById('stop-btn');
-      const searchInput = document.getElementById('search-input');
-      const statusMessage = document.getElementById('status-message');
-      const nowPlaying = document.getElementById('now-playing');
-      const songsList = document.getElementById('songs-list');
-      const playlistsContainer = document.getElementById('playlists-container');
-      const prayerTimesContainer = document.getElementById('prayer-times-container');
-      
-      // Handle tabs
-      const tabs = document.querySelectorAll('.tab');
-      const tabContents = document.querySelectorAll('.tabs-content > div');
-      
-      tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-          // Remove active class from all tabs
-          tabs.forEach(t => t.classList.remove('active'));
-          tabContents.forEach(c => c.classList.remove('active'));
-          
-          // Add active class to current tab
-          tab.classList.add('active');
-          const tabId = tab.getAttribute('data-tab') + '-tab';
-          document.getElementById(tabId).classList.add('active');
-          
-          // Load content for tab if needed
-          if (tab.getAttribute('data-tab') === 'playlists' && playlists.length === 0) {
-            loadPlaylists();
-          } else if (tab.getAttribute('data-tab') === 'prayer-times') {
-            loadPrayerTimes();
-          }
-        });
-      });
-      
-      // Fetch media players from Home Assistant
-      function loadMediaPlayers() {
-        setStatusMessage('Media apparaten laden...', 'loading');
-        
-        fetch('/api/media_players')
-          .then(response => response.json())
-          .then(data => {
-            mediaPlayers = data;
-            
-            // Clear previous options
-            mediaPlayerSelect.innerHTML = '<option value="">Kies een mediaspeler...</option>';
-            
-            // Add options for each media player
-            mediaPlayers.forEach(player => {
-              const option = document.createElement('option');
-              option.value = player.entity_id;
-              option.textContent = `${player.name} (${player.state})`;
-              mediaPlayerSelect.appendChild(option);
-            });
-            
-            setStatusMessage(`${mediaPlayers.length} media apparaten geladen`, 'success');
-          })
-          .catch(error => {
-            console.error('Error loading media players:', error);
-            setStatusMessage('Fout bij laden van media apparaten', 'error');
-          });
+    // Load available media players
+    async function loadMediaPlayers() {
+      try {
+        const response = await fetch('/api/media_players');
+        const players = await response.json();
+        const select = document.getElementById('mediaPlayer');
+        select.innerHTML = players.map(player => 
+          `<option value="${player.entity_id}">${player.name}</option>`
+        ).join('');
+      } catch (error) {
+        console.error('Error loading media players:', error);
+        alert('Failed to load media players');
       }
-      
-      // Load songs from FamilyStream
-      function loadSongs() {
-        setStatusMessage('Liedjes laden...', 'loading');
-        
-        // Mock songs for now (in real implementation, fetch from FamilyStream API)
-        songs = [
-          { id: '1', title: 'Psalm 42', artist: 'Psalmen', duration: '3:25', url: 'https://web.familystream.com/listen/song/42' },
-          { id: '2', title: 'Psalm 25', artist: 'Psalmen', duration: '4:10', url: 'https://web.familystream.com/listen/song/25' },
-          { id: '3', title: 'Psalm 84', artist: 'Psalmen', duration: '2:55', url: 'https://web.familystream.com/listen/song/84' },
-          { id: '4', title: 'Psalm 119', artist: 'Psalmen', duration: '5:30', url: 'https://web.familystream.com/listen/song/119' },
-          { id: '5', title: 'Gebed des Heeren', artist: 'Geestelijke liederen', duration: '3:45', url: 'https://web.familystream.com/listen/song/gebed' },
-          { id: '6', title: 'Avondzang', artist: 'Geestelijke liederen', duration: '2:30', url: 'https://web.familystream.com/listen/song/avond' },
-          { id: '7', title: 'De Tien Geboden', artist: 'Geestelijke liederen', duration: '4:20', url: 'https://web.familystream.com/listen/song/geboden' },
-          { id: '8', title: 'Morgenzang', artist: 'Geestelijke liederen', duration: '3:10', url: 'https://web.familystream.com/listen/song/morgen' }
-        ];
-        
-        renderSongs(songs);
-        setStatusMessage('Liedjes geladen', 'success');
-      }
-      
-      // Render songs in the list
-      function renderSongs(songsList) {
-        const songsListElement = document.getElementById('songs-list');
-        songsListElement.innerHTML = '';
-        
-        songsList.forEach(song => {
-          const li = document.createElement('li');
-          li.className = 'song-item';
-          li.dataset.id = song.id;
-          li.dataset.url = song.url;
-          li.dataset.title = song.title;
-          li.dataset.artist = song.artist;
-          
-          li.innerHTML = `
-            <span class="play-icon">▶️</span>
-            <span class="song-title">${song.title}</span>
-            <span class="song-artist">${song.artist}</span>
-            <span class="song-duration">${song.duration}</span>
-          `;
-          
-          li.addEventListener('click', () => {
-            currentSong = song;
-            updateNowPlaying(song);
-            playBtn.disabled = !mediaPlayerSelect.value;
-            
-            // Mark current song as active
-            document.querySelectorAll('.song-item').forEach(item => {
-              item.classList.remove('active');
-            });
-            li.classList.add('active');
-            
-            if (mediaPlayerSelect.value) {
-              playSong(song);
-            } else {
-              setStatusMessage('Selecteer een mediaspeler om af te spelen', 'info');
-            }
-          });
-          
-          songsListElement.appendChild(li);
-        });
-        
-        // Hide loading indicator
-        document.querySelector('#songs-tab .loading').style.display = 'none';
-      }
-      
-      // Load playlists from FamilyStream
-      function loadPlaylists() {
-        setStatusMessage('Afspeellijsten laden...', 'loading');
-        
-        // Mock playlists for now
-        playlists = [
-          { id: '1', name: 'Psalmen', songCount: 150, description: 'Alle psalmen' },
-          { id: '2', name: 'Geestelijke liederen', songCount: 12, description: 'Geestelijke liederen bundel' },
-          { id: '3', name: 'Favorieten', songCount: 20, description: 'Mijn favoriete nummers' }
-        ];
-        
-        renderPlaylists(playlists);
-        setStatusMessage('Afspeellijsten geladen', 'success');
-      }
-      
-      // Render playlists
-      function renderPlaylists(playlists) {
-        playlistsContainer.innerHTML = '';
-        
-        playlists.forEach(playlist => {
-          const div = document.createElement('div');
-          div.className = 'playlist-item';
-          div.dataset.id = playlist.id;
-          
-          div.innerHTML = `
-            <div class="playlist-name">${playlist.name}</div>
-            <div class="playlist-details">${playlist.songCount} nummers • ${playlist.description}</div>
-          `;
-          
-          div.addEventListener('click', () => {
-            // Load songs from this playlist
-            setStatusMessage(`Nummers laden uit afspeellijst "${playlist.name}"...`, 'loading');
-            
-            // In real implementation, fetch songs from this playlist
-            // For now, just simulate with mock data
-            setTimeout(() => {
-              const playlistSongs = songs.filter(song => {
-                if (playlist.name === 'Psalmen') {
-                  return song.artist === 'Psalmen';
-                } else if (playlist.name === 'Geestelijke liederen') {
-                  return song.artist === 'Geestelijke liederen';
-                } else {
-                  return song.id % 2 === 0; // Random selection for "Favorieten"
-                }
-              });
-              
-              // Switch to songs tab and show these songs
-              tabs[0].click(); // Switch to songs tab
-              renderSongs(playlistSongs);
-              setStatusMessage(`Afspeellijst "${playlist.name}" geladen`, 'success');
-            }, 500);
-          });
-          
-          playlistsContainer.appendChild(div);
-        });
-        
-        // Hide loading indicator
-        document.querySelector('#playlists-tab .loading').style.display = 'none';
-      }
-      
-      // Load prayer times
-      function loadPrayerTimes() {
-        setStatusMessage('Gebedstijden laden...', 'loading');
-        
-        // Mock prayer times
-        const prayers = [
-          { name: 'Fajr (Ochtendgebed)', time: '5:30' },
-          { name: 'Dhuhr (Middaggebed)', time: '13:15' },
-          { name: 'Asr (Namiddaggebed)', time: '15:45' },
-          { name: 'Maghrib (Avondgebed)', time: '19:20' },
-          { name: 'Isha (Nachtgebed)', time: '21:00' }
-        ];
-        
-        prayerTimesContainer.innerHTML = '';
-        
-        prayers.forEach(prayer => {
-          const div = document.createElement('div');
-          div.className = 'prayer-item';
-          
-          div.innerHTML = `
-            <span class="prayer-name">${prayer.name}</span>
-            <span class="prayer-time">${prayer.time}</span>
-          `;
-          
-          prayerTimesContainer.appendChild(div);
-        });
-        
-        // Hide loading indicator
-        document.querySelector('#prayer-times-tab .loading').style.display = 'none';
-        setStatusMessage('Gebedstijden geladen', 'success');
-      }
-      
-      // Update now playing information
-      function updateNowPlaying(song) {
-        nowPlaying.querySelector('.now-playing-title').textContent = song.title;
-        nowPlaying.querySelector('.now-playing-artist').textContent = song.artist;
-      }
-      
-      // Play a song on the selected media player
-      function playSong(song) {
-        const entityId = mediaPlayerSelect.value;
-        if (!entityId) {
-          setStatusMessage('Selecteer eerst een mediaspeler', 'error');
-          return;
-        }
-        
-        currentEntityId = entityId;
-        
-        setStatusMessage(`Audio naar ${entityId} sturen...`, 'loading');
-        
-        fetch('/api/play', {
+    }
+
+    // Start streaming
+    async function startStreaming() {
+      try {
+        const entityId = document.getElementById('mediaPlayer').value;
+        const volume = document.getElementById('volume').value / 100;
+
+        const response = await fetch('/api/play', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             entity_id: entityId,
-            url: song.url,
-            title: song.title,
-            artist: song.artist,
-            volume: volumeControl.value / 100
-          }),
-        })
-          .then(response => response.json())
-          .then(result => {
-            if (result.success) {
-              setStatusMessage(`"${song.title}" speelt nu op ${getMediaPlayerName(entityId)}`, 'success');
-              enablePlayerControls();
-            } else {
-              setStatusMessage('Fout: ' + (result.error || 'Onbekende fout'), 'error');
-            }
-          })
-          .catch(error => {
-            console.error('Error playing song:', error);
-            setStatusMessage('Fout bij afspelen', 'error');
-          });
-      }
-      
-      // Get media player name by entity ID
-      function getMediaPlayerName(entityId) {
-        const player = mediaPlayers.find(p => p.entity_id === entityId);
-        return player ? player.name : entityId;
-      }
-      
-      // Enable player controls
-      function enablePlayerControls() {
-        playBtn.disabled = false;
-        pauseBtn.disabled = false;
-        stopBtn.disabled = false;
-      }
-      
-      // Disable player controls
-      function disablePlayerControls() {
-        playBtn.disabled = true;
-        pauseBtn.disabled = true;
-        stopBtn.disabled = true;
-      }
-      
-      // Control media playback
-      function controlMedia(action) {
-        if (!currentEntityId) {
-          setStatusMessage('Stuur eerst audio naar een apparaat', 'error');
-          return;
-        }
-        
-        fetch('/api/media_control', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            entity_id: currentEntityId,
-            action: action
-          }),
-        })
-          .then(response => response.json())
-          .then(result => {
-            if (result.success) {
-              let actionText = '';
-              if (action === 'play') actionText = 'Afspelen';
-              else if (action === 'pause') actionText = 'Gepauzeerd';
-              else if (action === 'stop') actionText = 'Gestopt';
-              
-              setStatusMessage(`${actionText} op ${getMediaPlayerName(currentEntityId)}`, 'success');
-            } else {
-              setStatusMessage('Fout: ' + (result.error || 'Onbekende fout'), 'error');
-            }
-          })
-          .catch(error => {
-            console.error(`Error sending ${action} command:`, error);
-            setStatusMessage(`Fout bij versturen van ${action} commando`, 'error');
-          });
-      }
-      
-      // Set volume
-      function setVolume() {
-        if (!currentEntityId) return;
-        
-        const volume = volumeControl.value / 100;
-        
-        fetch('/api/volume', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            entity_id: currentEntityId,
             volume: volume
-          }),
-        })
-          .then(response => response.json())
-          .then(result => {
-            if (result.success) {
-              setStatusMessage(`Volume ingesteld op ${Math.round(volume * 100)}%`, 'success');
-            }
           })
-          .catch(error => {
-            console.error('Error setting volume:', error);
-          });
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to start streaming');
+        }
+      } catch (error) {
+        console.error('Error starting stream:', error);
+        alert('Failed to start streaming');
       }
-      
-      // Set status message
-      function setStatusMessage(message, type = 'info') {
-        statusMessage.textContent = message;
-        statusMessage.className = 'status-message';
+    }
+
+    // Stop streaming
+    async function stopStreaming() {
+      try {
+        const entityId = document.getElementById('mediaPlayer').value;
         
-        if (type === 'error') {
-          statusMessage.classList.add('error');
-        } else if (type === 'success') {
-          statusMessage.classList.add('success');
-        }
+        await fetch('/api/media_control', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            entity_id: entityId,
+            action: 'stop'
+          })
+        });
+      } catch (error) {
+        console.error('Error stopping stream:', error);
+        alert('Failed to stop streaming');
       }
-      
-      // Handle search
-      searchInput.addEventListener('input', () => {
-        const searchTerm = searchInput.value.toLowerCase();
-        
-        if (searchTerm.length === 0) {
-          renderSongs(songs);
-          return;
-        }
-        
-        const filteredSongs = songs.filter(song => 
-          song.title.toLowerCase().includes(searchTerm) || 
-          song.artist.toLowerCase().includes(searchTerm)
-        );
-        
-        renderSongs(filteredSongs);
-      });
-      
-      // Event listeners
-      refreshPlayersBtn.addEventListener('click', loadMediaPlayers);
-      mediaPlayerSelect.addEventListener('change', () => {
-        // If a song is selected and a media player is selected, enable the play button
-        if (currentSong && mediaPlayerSelect.value) {
-          playBtn.disabled = false;
-        } else {
-          playBtn.disabled = true;
-        }
-      });
-      
-      playBtn.addEventListener('click', () => {
-        if (currentSong) {
-          playSong(currentSong);
-        } else {
-          setStatusMessage('Selecteer eerst een nummer', 'error');
-        }
-      });
-      
-      pauseBtn.addEventListener('click', () => controlMedia('pause'));
-      stopBtn.addEventListener('click', () => controlMedia('stop'));
-      volumeControl.addEventListener('change', setVolume);
-      
-      // Initialize
-      loadMediaPlayers();
-      loadSongs();
+    }
+
+    // Update volume display
+    document.getElementById('volume').addEventListener('input', function(e) {
+      document.getElementById('volumeValue').textContent = e.target.value + '%';
     });
+
+    // Load media players on page load
+    window.addEventListener('load', loadMediaPlayers);
   </script>
 </body>
 </html> 

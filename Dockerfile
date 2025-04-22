@@ -1,39 +1,39 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.16
-FROM ${BUILD_FROM}
+FROM ghcr.io/home-assistant/amd64-base-debian:bullseye
 
 # Install required packages
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y \
+    firefox-esr \
+    xvfb \
+    pulseaudio \
     nodejs \
     npm \
-    python3 \
-    py3-pip \
-    ffmpeg \
-    alsa-utils \
-    ca-certificates \
-    curl \
-    openssl
+    x11vnc \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
+# Set up working directory
 WORKDIR /app
 
-# Copy app files
-COPY app /app
+# Copy application files
+COPY app/ /app/
 
-# Install npm dependencies
+# Install Node.js dependencies
 RUN cd /app && npm install
 
-# Copy data for add-on
+# Copy configuration files
+COPY config.yaml /
 COPY run.sh /
-RUN chmod a+x /run.sh
+COPY supervisord.conf /etc/supervisor/conf.d/
 
-# Create cache directories for static files
-RUN mkdir -p /app/cache/design/css
-RUN mkdir -p /app/cache/design/js
-RUN mkdir -p /app/cache/design/fonts
-RUN mkdir -p /app/cache/design/images
+# Make scripts executable
+RUN chmod +x /run.sh
 
-# Set environment variables
-ENV NODE_ENV=production
-ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+# Set up virtual display and audio
+ENV DISPLAY=:99
+ENV PULSE_SERVER=unix:/tmp/pulse/native
 
-CMD [ "/run.sh" ] 
+# Expose ports
+EXPOSE 8099 5900
+
+# Set entrypoint
+ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"] 
