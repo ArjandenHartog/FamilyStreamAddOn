@@ -1,9 +1,10 @@
 const express = require('express');
-const axios = require('axios');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const path = require('path');
 const cors = require('cors');
 const compression = require('compression');
 const bodyParser = require('body-parser');
+const axios = require('axios');
 const https = require('https');
 
 const app = express();
@@ -26,14 +27,11 @@ app.use(cors({
   optionsSuccessStatus: 204
 })); // Enable CORS for all routes
 app.use(bodyParser.json()); // Parse JSON request bodies
-app.use(express.static(path.join(__dirname, 'public')));
 
-// Serve index.html for root path
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// Serve static files (for helper UI)
+app.use('/ha-controls', express.static(path.join(__dirname, 'public')));
 
-// Create API for interacting with Home Assistant
+// API for HA media players
 app.get('/api/media_players', async (req, res) => {
   try {
     const haResponse = await axiosInstance.get('http://supervisor/core/api/states', {
@@ -58,7 +56,7 @@ app.get('/api/media_players', async (req, res) => {
   }
 });
 
-// Endpoint to control playback on a media player
+// Endpoint to play media on a Home Assistant player
 app.post('/api/play', async (req, res) => {
   try {
     const { entity_id, url, title, artist, volume } = req.body;
@@ -181,7 +179,94 @@ app.post('/api/volume', async (req, res) => {
   }
 });
 
+// Helper page for the floating controls
+app.get('/controls', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'controls.html'));
+});
+
+// Improved proxy configuration for FamilyStream
+const familyStreamProxy = createProxyMiddleware({
+  target: 'https://web.familystream.com',
+  changeOrigin: true,
+  secure: false,
+  ws: true,
+  followRedirects: true,
+  cookieDomainRewrite: {
+    '*': ''
+  },
+  onProxyReq: (proxyReq, req, res) => {
+    // Add necessary headers
+    proxyReq.setHeader('Origin', 'https://web.familystream.com');
+    proxyReq.setHeader('Referer', 'https://web.familystream.com/');
+    
+    // Log proxy requests for debugging
+    console.log(`Proxying request to: ${req.url}`);
+  },
+  onProxyRes: (proxyRes, req, res) => {
+    // Handle CORS headers
+    proxyRes.headers['access-control-allow-origin'] = '*';
+    
+    // Add Home Assistant controls if HTML
+    if (proxyRes.headers['content-type'] && proxyRes.headers['content-type'].includes('text/html')) {
+      delete proxyRes.headers['content-length'];
+      
+      const _write = res.write;
+      let body = '';
+      
+      res.write = function(data) {
+        if (data) {
+          body += data.toString('utf8');
+        }
+        
+        if (body.includes('</body>')) {
+          const script = `
+            <div id="ha-audio-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px; color: white;">
+              <button id="ha-open-controls" style="background: #03a9f4; color: white; border: none; padding: 5px 10px; border-radius: 3px;">
+                HA Audio Controls
+              </button>
+              <script>
+                document.getElementById('ha-open-controls').addEventListener('click', function() {
+                  window.open('/controls', 'ha_controls', 'width=400,height=600');
+                });
+                
+                // Enhanced audio interception
+                document.addEventListener('play', function(e) {
+                  if (e.target.tagName === 'AUDIO') {
+                    console.log('Audio playing:', e.target.src);
+                    // Send audio info to HA controls
+                    window.postMessage({
+                      type: 'ha_audio_playing',
+                      url: e.target.src,
+                      title: e.target.title || 'Unknown Track',
+                      artist: 'FamilyStream'
+                    }, '*');
+                  }
+                }, true);
+              </script>
+            </div>
+          `;
+          
+          body = body.replace('</body>', script + '</body>');
+          return _write.call(res, body);
+        }
+        
+        return _write.call(res, data);
+      };
+    }
+  },
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'nl,en-US;q=0.7,en;q=0.3',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache'
+  }
+});
+
+// Apply proxy to all routes not handled by other middleware
+app.use('/', familyStreamProxy);
+
 // Start the server
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`FamilyStream add-on running on port ${port}`);
 }); 
