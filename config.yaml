@@ -1,6 +1,6 @@
 name: "FamilyStream"
 description: "FamilyStream Browser met audio doorsturen naar Home Assistant mediaspelers"
-version: "1.4.0"
+version: "2.0.0"
 slug: "familystream"
 init: false
 arch:
