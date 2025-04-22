@@ -19,6 +19,22 @@ app.use(bodyParser.json()); // Parse JSON request bodies
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/cache', express.static(path.join(__dirname, 'cache'))); // Serve cached files
 
+// Set correct MIME types
+app.use((req, res, next) => {
+  if (req.path.endsWith('.css')) {
+    res.type('text/css');
+  } else if (req.path.endsWith('.js')) {
+    res.type('application/javascript');
+  } else if (req.path.endsWith('.woff')) {
+    res.type('font/woff');
+  } else if (req.path.endsWith('.woff2')) {
+    res.type('font/woff2');
+  } else if (req.path.endsWith('.ttf')) {
+    res.type('font/ttf');
+  }
+  next();
+});
+
 // Cache middleware
 const cacheDir = path.join(__dirname, 'cache');
 const cacheMiddleware = (req, res, next) => {
@@ -38,6 +54,18 @@ const cacheMiddleware = (req, res, next) => {
   // Check if file exists in cache
   if (fs.existsSync(cachePath)) {
     console.log(`Serving cached file: ${req.path}`);
+    // Set correct content type
+    if (req.path.endsWith('.css')) {
+      res.set('Content-Type', 'text/css');
+    } else if (req.path.endsWith('.js')) {
+      res.set('Content-Type', 'application/javascript');
+    } else if (req.path.endsWith('.woff')) {
+      res.set('Content-Type', 'font/woff');
+    } else if (req.path.endsWith('.woff2')) {
+      res.set('Content-Type', 'font/woff2');
+    } else if (req.path.endsWith('.ttf')) {
+      res.set('Content-Type', 'font/ttf');
+    }
     return res.sendFile(cachePath);
   }
   
@@ -110,6 +138,89 @@ app.post('/api/play', async (req, res) => {
   }
 });
 
+// Handler for CSS files
+app.get('/design/style_23.min.css', (req, res) => {
+  axios({
+    method: 'get',
+    url: 'https://web.familystream.com/design/style_23.min.css',
+    responseType: 'stream'
+  })
+    .then(response => {
+      res.set('Content-Type', 'text/css');
+      response.data.pipe(res);
+    })
+    .catch(error => {
+      console.error('Error fetching CSS:', error);
+      res.status(500).send('Error fetching CSS');
+    });
+});
+
+app.get('/design/ui-schema_23.min.css', (req, res) => {
+  axios({
+    method: 'get',
+    url: 'https://web.familystream.com/design/ui-schema_23.min.css',
+    responseType: 'stream'
+  })
+    .then(response => {
+      res.set('Content-Type', 'text/css');
+      response.data.pipe(res);
+    })
+    .catch(error => {
+      console.error('Error fetching CSS:', error);
+      res.status(500).send('Error fetching CSS');
+    });
+});
+
+app.get('/design/transitions_23.min.css', (req, res) => {
+  axios({
+    method: 'get',
+    url: 'https://web.familystream.com/design/transitions_23.min.css',
+    responseType: 'stream'
+  })
+    .then(response => {
+      res.set('Content-Type', 'text/css');
+      response.data.pipe(res);
+    })
+    .catch(error => {
+      console.error('Error fetching CSS:', error);
+      res.status(500).send('Error fetching CSS');
+    });
+});
+
+app.get('/design/js/perfect-scrollbar.min.css', (req, res) => {
+  axios({
+    method: 'get',
+    url: 'https://web.familystream.com/design/js/perfect-scrollbar.min.css',
+    responseType: 'stream'
+  })
+    .then(response => {
+      res.set('Content-Type', 'text/css');
+      response.data.pipe(res);
+    })
+    .catch(error => {
+      console.error('Error fetching CSS:', error);
+      res.status(500).send('Error fetching CSS');
+    });
+});
+
+// Special handler for JS files with proper MIME type
+app.get('/design/js/:file', (req, res) => {
+  const file = req.params.file;
+  axios({
+    method: 'get',
+    url: `https://web.familystream.com/design/js/${file}`,
+    responseType: 'stream'
+  })
+    .then(response => {
+      res.set('Content-Type', 'application/javascript');
+      response.data.pipe(res);
+    })
+    .catch(error => {
+      console.error(`Error fetching JS file ${file}:`, error);
+      res.status(500).send(`Error fetching JS file ${file}`);
+    });
+});
+
 // Serve our custom integration script directly
 app.get('/familystream-ha-integration.js', (req, res) => {
   res.set('Content-Type', 'application/javascript');
@@ -129,13 +240,22 @@ const proxyOptions = {
   autoRewrite: true,
   protocolRewrite: 'https',
   cookieDomainRewrite: { '*': '' },
+  hostRewrite: '', // Avoid rewriting to homeassistent.me
   onProxyRes: function(proxyRes, req, res) {
     // Fix CORS issues
     proxyRes.headers['Access-Control-Allow-Origin'] = '*';
     
-    // Fix content-type issues for scripts
-    if (req.path.endsWith('.js') && proxyRes.headers['content-type'] === 'text/plain') {
+    // Fix content-type issues for scripts and stylesheets
+    if (req.path.endsWith('.js')) {
       proxyRes.headers['content-type'] = 'application/javascript';
+    } else if (req.path.endsWith('.css')) {
+      proxyRes.headers['content-type'] = 'text/css';
+    } else if (req.path.endsWith('.woff')) {
+      proxyRes.headers['content-type'] = 'font/woff';
+    } else if (req.path.endsWith('.woff2')) {
+      proxyRes.headers['content-type'] = 'font/woff2';
+    } else if (req.path.endsWith('.ttf')) {
+      proxyRes.headers['content-type'] = 'font/ttf';
     }
     
     // Cache static files
@@ -179,9 +299,11 @@ const proxyOptions = {
       res.end = function() {
         // Fix any broken relative URLs
         let modifiedBody = originalBody
-          .replace(/src="\/design\//g, 'src="/design/')
           .replace(/href="\/design\//g, 'href="/design/')
-          .replace(/url\(\/design\//g, 'url(/design/');
+          .replace(/src="\/design\//g, 'src="/design/')
+          .replace(/url\(\/design\//g, 'url(/design/')
+          // Replace incorrect domain references
+          .replace(/homeassistent.me/g, req.headers.host);
           
         // Inject our script before the closing body tag
         modifiedBody = modifiedBody.replace(
@@ -203,7 +325,14 @@ const proxyOptions = {
                 return false;
               };
             }
-          </script>`
+          </script>
+          <style>
+            /* Ensure CSS is applied */
+            @import url("/design/style_23.min.css?v=17");
+            @import url("/design/ui-schema_23.min.css?v=17");
+            @import url("/design/transitions_23.min.css?v=17");
+            @import url("/design/js/perfect-scrollbar.min.css");
+          </style>`
         );
         
         _write.call(res, Buffer.from(modifiedBody));
