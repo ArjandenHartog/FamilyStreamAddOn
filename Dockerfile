@@ -1,18 +1,31 @@
-FROM ghcr.io/home-assistant/amd64-base-debian:bullseye
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.16
+FROM ${BUILD_FROM}
 
-# Install required packages
-RUN apt-get update && apt-get install -y \
-    firefox-esr \
-    xvfb \
+# Set shell
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Install packages
+RUN apk add --no-cache \
     pulseaudio \
+    pulseaudio-utils \
+    alsa-utils \
     nodejs \
     npm \
-    x11vnc \
-    supervisor \
     ffmpeg \
-    alsa-utils \
-    pulseaudio-utils \
-    && rm -rf /var/lib/apt/lists/*
+    bash \
+    curl \
+    socat \
+    xvfb \
+    x11vnc \
+    mesa-dri-swrast \
+    mesa-gl \
+    ttf-dejavu \
+    supervisor
+
+# Install Firefox (using manual download since Alpine doesn't have it in repos)
+RUN mkdir -p /opt/firefox && \
+    curl -L "https://download.mozilla.org/?product=firefox-latest-ssl&os=linux64&lang=en-US" | tar -xj -C /opt && \
+    ln -s /opt/firefox/firefox /usr/bin/firefox
 
 # Set up working directory
 WORKDIR /app
@@ -42,4 +55,4 @@ RUN mkdir -p /tmp/pulse
 EXPOSE 8099 5900
 
 # Set entrypoint
-ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"] 
+CMD [ "/run.sh" ] 
