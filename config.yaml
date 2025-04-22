@@ -21,8 +21,10 @@ host_network: true
 audio: true
 options:
   default_media_player: ""
+  supervisor_token: ""
 schema:
   default_media_player: str
+  supervisor_token: str
 webui: "http://[HOST]:[PORT:8099]"
 ports:
   8099/tcp: 8099

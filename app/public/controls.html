@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>FamilyStream Audio Controls</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #03a9f4;
+            margin-top: 0;
+            font-size: 24px;
+        }
+        .control-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        select, input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            flex: 1;
+            padding: 10px;
+            background: #03a9f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0288d1;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background: #e8f5e9;
+            color: #1b5e20;
+            display: block !important;
+        }
+        .error {
+            background: #ffebee;
+            color: #b71c1c;
+            display: block !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>FamilyStream Audio Controls</h1>
+        
+        <div class="control-group">
+            <label for="media-player">Select Media Player:</label>
+            <select id="media-player"></select>
+            <button id="refresh-btn" onclick="loadMediaPlayers()">Refresh</button>
+        </div>
+        
+        <div class="control-group">
+            <label for="volume-control">Volume:</label>
+            <input type="range" id="volume-control" min="0" max="100" value="50">
+            <span id="volume-value">50%</span>
+        </div>
+        
+        <div class="btn-group">
+            <button id="play-btn" onclick="playCurrent()">Play Current Audio</button>
+            <button id="stop-btn" onclick="stopPlayback()">Stop Playback</button>
+        </div>
+        
+        <div id="status"></div>
+    </div>
+    
+    <script>
+        // Global vars
+        let mediaPlayers = [];
+        let currentAudio = null;
+        const statusEl = document.getElementById('status');
+        const volumeControl = document.getElementById('volume-control');
+        const volumeValue = document.getElementById('volume-value');
+        
+        // Load media players
+        async function loadMediaPlayers() {
+            try {
+                const response = await fetch('/api/media_players');
+                mediaPlayers = await response.json();
+                
+                const selectEl = document.getElementById('media-player');
+                selectEl.innerHTML = '';
+                
+                mediaPlayers.forEach(player => {
+                    const option = document.createElement('option');
+                    option.value = player.entity_id;
+                    option.textContent = `${player.name} (${player.state})`;
+                    selectEl.appendChild(option);
+                });
+                
+                showStatus('Media players loaded', 'success');
+            } catch (error) {
+                console.error('Error loading media players:', error);
+                showStatus('Error loading media players', 'error');
+            }
+        }
+        
+        // Listen for audio messages from parent window
+        window.addEventListener('message', event => {
+            if (event.data && event.data.type === 'ha_audio_playing') {
+                currentAudio = event.data;
+                console.log('Received audio info:', currentAudio);
+                showStatus(`Ready to play: ${currentAudio.title}`, 'success');
+            }
+        });
+        
+        // Play current audio
+        async function playCurrent() {
+            const mediaPlayer = document.getElementById('media-player').value;
+            const volume = volumeControl.value / 100;
+            
+            if (!mediaPlayer) {
+                showStatus('Please select a media player', 'error');
+                return;
+            }
+            
+            // If we don't have audio info yet, let's check what's playing
+            if (!currentAudio) {
+                // In this case, use a fixed URL or let the user know
+                showStatus('Listening for audio...', 'info');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/play', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        entity_id: mediaPlayer,
+                        url: currentAudio.url,
+                        title: currentAudio.title,
+                        artist: currentAudio.artist,
+                        volume: volume
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus('Playing on ' + getMediaPlayerName(mediaPlayer), 'success');
+                } else {
+                    showStatus('Error: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                console.error('Error playing media:', error);
+                showStatus('Error playing media', 'error');
+            }
+        }
+        
+        // Stop playback
+        async function stopPlayback() {
+            const mediaPlayer = document.getElementById('media-player').value;
+            
+            if (!mediaPlayer) {
+                showStatus('Please select a media player', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/media_control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        entity_id: mediaPlayer,
+                        action: 'stop'
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus('Stopped playback on ' + getMediaPlayerName(mediaPlayer), 'success');
+                } else {
+                    showStatus('Error: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                console.error('Error stopping playback:', error);
+                showStatus('Error stopping playback', 'error');
+            }
+        }
+        
+        // Get media player name by entity_id
+        function getMediaPlayerName(entityId) {
+            const player = mediaPlayers.find(p => p.entity_id === entityId);
+            return player ? player.name : entityId;
+        }
+        
+        // Show status message
+        function showStatus(message, type) {
+            statusEl.textContent = message;
+            statusEl.className = '';
+            statusEl.classList.add(type);
+            
+            if (type !== 'error') {
+                setTimeout(() => {
+                    statusEl.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        // Update volume display
+        volumeControl.addEventListener('input', function() {
+            volumeValue.textContent = this.value + '%';
+        });
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            loadMediaPlayers();
+        });
+    </script>
+</body>
+</html> 
