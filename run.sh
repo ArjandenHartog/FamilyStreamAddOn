@@ -48,8 +48,8 @@ command=/usr/bin/x11vnc -display :99 -forever -shared -nopw
 autorestart=true
 priority=30
 
-[program:firefox]
-command=/usr/bin/firefox --kiosk --no-remote --private-window https://web.familystream.com
+[program:browser]
+command=/usr/bin/chromium-browser --no-sandbox --disable-gpu --kiosk --incognito --disable-dev-shm-usage https://web.familystream.com
 environment=DISPLAY=":99",PULSE_SERVER="unix:/tmp/pulse/native"
 autorestart=true
 priority=40

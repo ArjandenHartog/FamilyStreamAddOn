@@ -31,11 +31,11 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Global variables to track state
-let currentFirefoxAudioStream = null;
+let currentBrowserAudioStream = null;
 let streamingProcess = null;
 
-// Function to find Firefox audio stream (Alpine version)
-async function findFirefoxAudioStream() {
+// Function to find browser audio stream (Alpine version)
+async function findBrowserAudioStream() {
   return new Promise((resolve, reject) => {
     // On Alpine Linux, we'll use a different approach
     // First, ensure the audio device exists
@@ -73,37 +73,37 @@ async function setupAudioStream(entityId, volume) {
       streamingProcess = null;
     }
     
-    // Find Firefox audio
-    const { defaultSink } = await findFirefoxAudioStream();
+    // Find browser audio
+    const { defaultSink } = await findBrowserAudioStream();
     
     // Create a virtual audio sink
-    console.log('Setting up PulseAudio virtual sink for Firefox...');
+    console.log('Setting up PulseAudio virtual sink for browser audio...');
     
     // Create null sink for capturing audio
-    exec('pactl load-module module-null-sink sink_name=firefoxcapture sink_properties=device.description="Firefox-Capture"', (error, stdout, stderr) => {
+    exec('pactl load-module module-null-sink sink_name=browsercapture sink_properties=device.description="Browser-Capture"', (error, stdout, stderr) => {
       if (error) {
         console.error('Error creating null sink:', error);
         return;
       }
       
       // Create loopback from default sink to our null sink
-      exec('pactl load-module module-loopback source=firefoxcapture.monitor sink=' + defaultSink, (error, stdout, stderr) => {
+      exec('pactl load-module module-loopback source=browsercapture.monitor sink=' + defaultSink, (error, stdout, stderr) => {
         if (error) {
           console.error('Error creating loopback:', error);
           return;
         }
         
-        console.log('PulseAudio configured for Firefox audio capture');
+        console.log('PulseAudio configured for browser audio capture');
         
         // Set stream URL
-        const streamUrl = `http://${process.env.HOSTNAME || 'localhost'}:${port}/audio/firefox.mp3`;
-        currentFirefoxAudioStream = streamUrl;
+        const streamUrl = `http://${process.env.HOSTNAME || 'localhost'}:${port}/audio/stream.mp3`;
+        currentBrowserAudioStream = streamUrl;
         
         // Start FFmpeg to stream audio
         console.log('Starting FFmpeg stream...');
         const ffmpeg = spawn('ffmpeg', [
           '-f', 'pulse',
-          '-i', 'firefoxcapture.monitor',
+          '-i', 'browsercapture.monitor',
           '-acodec', 'libmp3lame',
           '-ab', '192k',
           '-ac', '2',
@@ -150,7 +150,7 @@ async function sendPlayCommand(entityId, url, volume) {
       media_content_type: 'music',
       metadata: {
         title: "FamilyStream Audio",
-        artist: "Firefox Browser"
+        artist: "Browser"
       }
     };
     
@@ -182,7 +182,7 @@ async function sendPlayCommand(entityId, url, volume) {
 }
 
 // Audio stream endpoint - serves the audio as an HTTP stream
-app.get('/audio/firefox.mp3', (req, res) => {
+app.get('/audio/stream.mp3', (req, res) => {
   if (!streamingProcess) {
     return res.status(404).send('No audio stream available');
   }
@@ -223,7 +223,7 @@ app.get('/api/media_players', async (req, res) => {
   }
 });
 
-// Endpoint to stream Firefox audio to a Home Assistant media player
+// Endpoint to stream browser audio to a Home Assistant media player
 app.post('/api/play', async (req, res) => {
   try {
     const { entity_id, volume } = req.body;

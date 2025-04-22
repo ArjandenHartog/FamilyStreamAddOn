@@ -20,12 +20,8 @@ RUN apk add --no-cache \
     mesa-dri-swrast \
     mesa-gl \
     ttf-dejavu \
-    supervisor
-
-# Install Firefox (using manual download since Alpine doesn't have it in repos)
-RUN mkdir -p /opt/firefox && \
-    curl -L "https://download.mozilla.org/?product=firefox-latest-ssl&os=linux64&lang=en-US" | tar -xj -C /opt && \
-    ln -s /opt/firefox/firefox /usr/bin/firefox
+    supervisor \
+    chromium
 
 # Set up working directory
 WORKDIR /app
