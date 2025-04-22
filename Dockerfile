@@ -8,7 +8,10 @@ RUN apk add --no-cache \
     python3 \
     py3-pip \
     ffmpeg \
-    alsa-utils
+    alsa-utils \
+    ca-certificates \
+    curl \
+    openssl
 
 # Create app directory
 WORKDIR /app
@@ -22,5 +25,15 @@ RUN cd /app && npm install
 # Copy data for add-on
 COPY run.sh /
 RUN chmod a+x /run.sh
+
+# Create cache directories for static files
+RUN mkdir -p /app/cache/design/css
+RUN mkdir -p /app/cache/design/js
+RUN mkdir -p /app/cache/design/fonts
+RUN mkdir -p /app/cache/design/images
+
+# Set environment variables
+ENV NODE_ENV=production
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
 
 CMD [ "/run.sh" ] 
