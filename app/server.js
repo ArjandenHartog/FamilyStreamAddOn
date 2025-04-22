@@ -7,31 +7,52 @@ const WebSocket = require('ws');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const compression = require('compression');
+const https = require('https');
 
 const app = express();
 const port = process.env.PORT || 8099;
 const defaultMediaPlayer = process.env.DEFAULT_MEDIA_PLAYER || '';
 
+// Create axios instance with SSL verification disabled
+const axiosInstance = axios.create({
+  httpsAgent: new https.Agent({  
+    rejectUnauthorized: false
+  })
+});
+
 // Middleware
 app.use(compression()); // Enable compression
-app.use(cors()); // Enable CORS for all routes
+app.use(cors({
+  origin: '*',
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  credentials: true,
+  optionsSuccessStatus: 204
+})); // Enable CORS for all routes
 app.use(bodyParser.json()); // Parse JSON request bodies
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/cache', express.static(path.join(__dirname, 'cache'))); // Serve cached files
 
-// Set correct MIME types
+// Custom middleware to fix MIME types
 app.use((req, res, next) => {
-  if (req.path.endsWith('.css')) {
-    res.type('text/css');
-  } else if (req.path.endsWith('.js')) {
-    res.type('application/javascript');
-  } else if (req.path.endsWith('.woff')) {
-    res.type('font/woff');
-  } else if (req.path.endsWith('.woff2')) {
-    res.type('font/woff2');
-  } else if (req.path.endsWith('.ttf')) {
-    res.type('font/ttf');
-  }
+  const originalSend = res.send;
+  
+  res.send = function(body) {
+    if (req.path.endsWith('.js')) {
+      res.set('Content-Type', 'application/javascript');
+    } else if (req.path.endsWith('.css')) {
+      res.set('Content-Type', 'text/css');
+    } else if (req.path.endsWith('.woff') || req.path.endsWith('.woff2') || req.path.endsWith('.ttf')) {
+      res.set('Content-Type', 'font/woff2');
+    }
+    
+    // Add CORS headers to every response
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    
+    return originalSend.call(this, body);
+  };
+  
   next();
 });
 
@@ -54,18 +75,6 @@ const cacheMiddleware = (req, res, next) => {
   // Check if file exists in cache
   if (fs.existsSync(cachePath)) {
     console.log(`Serving cached file: ${req.path}`);
-    // Set correct content type
-    if (req.path.endsWith('.css')) {
-      res.set('Content-Type', 'text/css');
-    } else if (req.path.endsWith('.js')) {
-      res.set('Content-Type', 'application/javascript');
-    } else if (req.path.endsWith('.woff')) {
-      res.set('Content-Type', 'font/woff');
-    } else if (req.path.endsWith('.woff2')) {
-      res.set('Content-Type', 'font/woff2');
-    } else if (req.path.endsWith('.ttf')) {
-      res.set('Content-Type', 'font/ttf');
-    }
     return res.sendFile(cachePath);
   }
   
@@ -80,7 +89,7 @@ const cacheMiddleware = (req, res, next) => {
 // Create API for interacting with Home Assistant
 app.get('/api/media_players', async (req, res) => {
   try {
-    const haResponse = await axios.get('http://supervisor/core/api/states', {
+    const haResponse = await axiosInstance.get('http://supervisor/core/api/states', {
       headers: {
         Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
         'Content-Type': 'application/json',
@@ -124,7 +133,7 @@ app.post('/api/play', async (req, res) => {
       };
     }
     
-    await axios.post('http://supervisor/core/api/services/media_player/play_media', playData, {
+    await axiosInstance.post('http://supervisor/core/api/services/media_player/play_media', playData, {
       headers: {
         Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
         'Content-Type': 'application/json',
@@ -133,7 +142,7 @@ app.post('/api/play', async (req, res) => {
     
     // Set volume if provided
     if (volume !== undefined) {
-      await axios.post('http://supervisor/core/api/services/media_player/volume_set', {
+      await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
         entity_id,
         volume_level: volume
       }, {
@@ -173,7 +182,7 @@ app.post('/api/media_control', async (req, res) => {
     
     const service = serviceMap[action];
     
-    await axios.post(`http://supervisor/core/api/services/media_player/${service}`, {
+    await axiosInstance.post(`http://supervisor/core/api/services/media_player/${service}`, {
       entity_id
     }, {
       headers: {
@@ -202,7 +211,7 @@ app.post('/api/volume', async (req, res) => {
       return res.status(400).json({ error: 'Volume must be a value between 0 and 1' });
     }
     
-    await axios.post('http://supervisor/core/api/services/media_player/volume_set', {
+    await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
       entity_id,
       volume_level: volume
     }, {
@@ -219,184 +228,114 @@ app.post('/api/volume', async (req, res) => {
   }
 });
 
-// Handler for CSS files
-app.get('/design/style_23.min.css', (req, res) => {
-  axios({
-    method: 'get',
-    url: 'https://web.familystream.com/design/style_23.min.css',
-    responseType: 'stream'
-  })
-    .then(response => {
-      res.set('Content-Type', 'text/css');
-      response.data.pipe(res);
-    })
-    .catch(error => {
-      console.error('Error fetching CSS:', error);
-      res.status(500).send('Error fetching CSS');
-    });
-});
-
-app.get('/design/ui-schema_23.min.css', (req, res) => {
-  axios({
-    method: 'get',
-    url: 'https://web.familystream.com/design/ui-schema_23.min.css',
-    responseType: 'stream'
-  })
-    .then(response => {
-      res.set('Content-Type', 'text/css');
-      response.data.pipe(res);
-    })
-    .catch(error => {
-      console.error('Error fetching CSS:', error);
-      res.status(500).send('Error fetching CSS');
-    });
-});
-
-app.get('/design/transitions_23.min.css', (req, res) => {
-  axios({
-    method: 'get',
-    url: 'https://web.familystream.com/design/transitions_23.min.css',
-    responseType: 'stream'
-  })
-    .then(response => {
-      res.set('Content-Type', 'text/css');
-      response.data.pipe(res);
-    })
-    .catch(error => {
-      console.error('Error fetching CSS:', error);
-      res.status(500).send('Error fetching CSS');
-    });
-});
-
-app.get('/design/js/perfect-scrollbar.min.css', (req, res) => {
-  axios({
-    method: 'get',
-    url: 'https://web.familystream.com/design/js/perfect-scrollbar.min.css',
-    responseType: 'stream'
-  })
-    .then(response => {
-      res.set('Content-Type', 'text/css');
-      response.data.pipe(res);
-    })
-    .catch(error => {
-      console.error('Error fetching CSS:', error);
-      res.status(500).send('Error fetching CSS');
-    });
-});
-
-// Special handler for JS files with proper MIME type
-app.get('/design/js/:file', (req, res) => {
-  const file = req.params.file;
-  axios({
-    method: 'get',
-    url: `https://web.familystream.com/design/js/${file}`,
-    responseType: 'stream'
-  })
-    .then(response => {
-      res.set('Content-Type', 'application/javascript');
-      response.data.pipe(res);
-    })
-    .catch(error => {
-      console.error(`Error fetching JS file ${file}:`, error);
-      res.status(500).send(`Error fetching JS file ${file}`);
-    });
-});
-
 // Serve our custom integration script directly
 app.get('/familystream-ha-integration.js', (req, res) => {
   res.set('Content-Type', 'application/javascript');
   res.sendFile(path.join(__dirname, 'public', 'familystream-ha-integration.js'));
 });
 
-// Apply cache middleware
-app.use(cacheMiddleware);
+// Route to fetch any URL from FamilyStream
+app.get('/proxy/*', async (req, res) => {
+  try {
+    const url = req.path.replace('/proxy/', '');
+    const fullUrl = `https://web.familystream.com/${url}`;
+    
+    console.log(`Proxying request to: ${fullUrl}`);
+    
+    const response = await axiosInstance.get(fullUrl, {
+      responseType: 'arraybuffer'
+    });
+    
+    // Set appropriate content type
+    if (url.endsWith('.js')) {
+      res.set('Content-Type', 'application/javascript');
+    } else if (url.endsWith('.css')) {
+      res.set('Content-Type', 'text/css');
+    } else if (url.endsWith('.woff') || url.endsWith('.woff2')) {
+      res.set('Content-Type', 'font/woff2');
+    } else if (url.endsWith('.ttf')) {
+      res.set('Content-Type', 'font/ttf');
+    } else if (url.endsWith('.png')) {
+      res.set('Content-Type', 'image/png');
+    } else if (url.endsWith('.jpg') || url.endsWith('.jpeg')) {
+      res.set('Content-Type', 'image/jpeg');
+    } else if (url.endsWith('.svg')) {
+      res.set('Content-Type', 'image/svg+xml');
+    } else if (url.endsWith('.ico')) {
+      res.set('Content-Type', 'image/x-icon');
+    } else {
+      res.set('Content-Type', response.headers['content-type']);
+    }
+    
+    // Add CORS headers
+    res.set('Access-Control-Allow-Origin', '*');
+    
+    res.send(response.data);
+  } catch (error) {
+    console.error(`Error proxying request: ${error.message}`);
+    res.status(500).send(`Error proxying request: ${error.message}`);
+  }
+});
 
-// Proxy to FamilyStream website with improved configuration
+// Proxy middleware configuration
 const proxyOptions = {
   target: 'https://web.familystream.com',
   changeOrigin: true,
-  secure: true,
+  secure: false,
   followRedirects: true,
   logLevel: 'debug',
-  autoRewrite: true,
-  protocolRewrite: 'https',
-  cookieDomainRewrite: { '*': '' },
-  hostRewrite: '', // Avoid rewriting to homeassistent.me
-  onProxyRes: function(proxyRes, req, res) {
-    // Fix CORS issues
-    proxyRes.headers['Access-Control-Allow-Origin'] = '*';
+  selfHandleResponse: true,
+  onProxyReq: (proxyReq, req, res) => {
+    // Set cookies and headers to make the request look like it's coming from a browser
+    proxyReq.setHeader('Origin', 'https://web.familystream.com');
+    proxyReq.setHeader('Referer', 'https://web.familystream.com/');
+    proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     
-    // Fix content-type issues for scripts and stylesheets
-    if (req.path.endsWith('.js')) {
-      proxyRes.headers['content-type'] = 'application/javascript';
-    } else if (req.path.endsWith('.css')) {
-      proxyRes.headers['content-type'] = 'text/css';
-    } else if (req.path.endsWith('.woff')) {
-      proxyRes.headers['content-type'] = 'font/woff';
-    } else if (req.path.endsWith('.woff2')) {
-      proxyRes.headers['content-type'] = 'font/woff2';
-    } else if (req.path.endsWith('.ttf')) {
-      proxyRes.headers['content-type'] = 'font/ttf';
+    // Forward cookies
+    if (req.headers.cookie) {
+      proxyReq.setHeader('Cookie', req.headers.cookie);
+    }
+  },
+  onProxyRes: (proxyRes, req, res) => {
+    // Copy all headers from the proxied response
+    Object.keys(proxyRes.headers).forEach(key => {
+      res.setHeader(key, proxyRes.headers[key]);
+    });
+    
+    // Override certain headers for CORS and content types
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    
+    // Fix content types
+    const url = req.url;
+    if (url.endsWith('.js')) {
+      res.setHeader('Content-Type', 'application/javascript');
+    } else if (url.endsWith('.css')) {
+      res.setHeader('Content-Type', 'text/css');
     }
     
-    // Cache static files
-    const fileTypes = ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.woff', '.woff2', '.ttf', '.eot'];
-    const shouldCache = fileTypes.some(type => req.path.endsWith(type));
-    
-    if (shouldCache) {
-      const cachePath = path.join(cacheDir, req.path);
-      const cacheDirPath = path.dirname(cachePath);
-      
-      if (!fs.existsSync(cacheDirPath)) {
-        fs.mkdirSync(cacheDirPath, { recursive: true });
-      }
-      
-      let body = Buffer.from([]);
-      const _write = res.write;
-      res.write = function(chunk) {
-        body = Buffer.concat([body, chunk]);
-        return _write.call(res, chunk);
-      };
-      
-      const _end = res.end;
-      res.end = function() {
-        fs.writeFileSync(cachePath, body);
-        console.log(`Cached file: ${req.path}`);
-        _end.call(res);
-      };
-    }
-    
-    // Inject our script only in HTML responses
+    // Handle HTML response to inject our script and rewrite URLs
     if (proxyRes.headers['content-type'] && proxyRes.headers['content-type'].includes('text/html')) {
-      delete proxyRes.headers['content-length'];
-      let originalBody = '';
-      const _write = res.write;
-      res.write = function(chunk) {
-        originalBody += chunk.toString('utf8');
-        return true;
-      };
+      let body = '';
       
-      const _end = res.end;
-      res.end = function() {
-        // Fix any broken relative URLs
-        let modifiedBody = originalBody
-          .replace(/href="\/design\//g, 'href="/design/')
-          .replace(/src="\/design\//g, 'src="/design/')
-          .replace(/url\(\/design\//g, 'url(/design/')
-          // Replace incorrect domain references
-          .replace(/homeassistent.me/g, req.headers.host);
-          
-        // Inject our script before the closing body tag
-        modifiedBody = modifiedBody.replace(
-          '</body>',
-          `<script src="/familystream-ha-integration.js"></script></body>`
-        );
+      // Collect response data
+      proxyRes.on('data', chunk => {
+        body += chunk.toString();
+      });
+      
+      // Process and send the response
+      proxyRes.on('end', () => {
+        // Replace absolute URLs with our proxy URLs
+        let modifiedBody = body
+          .replace(/href="\/design\//g, 'href="/proxy/design/')
+          .replace(/src="\/design\//g, 'src="/proxy/design/')
+          .replace(/url\(\/design\//g, 'url(/proxy/design/');
         
-        // Add polyfill for missing InputPreventDefault function
+        // Inject our custom script
         modifiedBody = modifiedBody.replace(
-          '<head>',
-          `<head>
-          <script>
+          '</head>',
+          `<script>
             // Fix for missing InputPreventDefault function
             if (typeof InputPreventDefault === 'undefined') {
               window.InputPreventDefault = function(event) {
@@ -407,43 +346,31 @@ const proxyOptions = {
               };
             }
           </script>
-          <style>
-            /* Ensure CSS is applied */
-            @import url("/design/style_23.min.css?v=17");
-            @import url("/design/ui-schema_23.min.css?v=17");
-            @import url("/design/transitions_23.min.css?v=17");
-            @import url("/design/js/perfect-scrollbar.min.css");
-          </style>`
+          </head>`
         );
         
-        _write.call(res, Buffer.from(modifiedBody));
-        _end.call(res);
-      };
+        modifiedBody = modifiedBody.replace(
+          '</body>',
+          `<script src="/familystream-ha-integration.js"></script></body>`
+        );
+        
+        res.send(modifiedBody);
+      });
+    } else {
+      // For non-HTML responses, just pipe the data
+      proxyRes.pipe(res);
     }
   },
-  // Handle errors in proxy
   onError: (err, req, res) => {
     console.error('Proxy error:', err);
     res.writeHead(500, {
       'Content-Type': 'text/plain',
     });
-    res.end('Proxy error connecting to FamilyStream: ' + err.message);
-  },
-  // Modify request headers
-  onProxyReq: (proxyReq, req, res) => {
-    // Set referer to the original site to avoid referer-based blocking
-    proxyReq.setHeader('Referer', 'https://web.familystream.com/');
-    proxyReq.setHeader('Origin', 'https://web.familystream.com');
-    
-    // Set cookie handling
-    proxyReq.setHeader('Cookie', req.headers.cookie || '');
-    
-    // Keep alive connection
-    proxyReq.setHeader('Connection', 'keep-alive');
+    res.end(`Proxy error: ${err.message}`);
   }
 };
 
-// Apply proxy middleware with proper routing
+// Apply proxy for the home page
 app.use('/', createProxyMiddleware(proxyOptions));
 
 // Start the server
