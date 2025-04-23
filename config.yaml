@@ -22,11 +22,11 @@ audio: true
 devices:
   - /dev/snd
 options:
-  default_media_player: ""
+  default_media_player: "media_player.slaapkamer"
   supervisor_token: ""
 schema:
   default_media_player: str
-  supervisor_token: str
+  supervisor_token: str?
 webui: "http://[HOST]:[PORT:8099]"
 ports:
   8099/tcp: 8099

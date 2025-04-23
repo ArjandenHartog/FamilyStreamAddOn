@@ -9,7 +9,10 @@ const https = require('https');
 
 const app = express();
 const port = process.env.PORT || 8099;
-const defaultMediaPlayer = process.env.DEFAULT_MEDIA_PLAYER || '';
+const defaultMediaPlayer = process.env.DEFAULT_MEDIA_PLAYER || 'media_player.slaapkamer';
+const supervisorToken = process.env.SUPERVISOR_TOKEN || '';
+
+console.log(`Default media player set to: ${defaultMediaPlayer}`);
 
 // Audio stream state
 let currentAudioState = {
@@ -40,14 +43,34 @@ app.use(bodyParser.json()); // Parse JSON request bodies
 // Serve static files (for helper UI)
 app.use('/ha-controls', express.static(path.join(__dirname, 'public')));
 
+// Helper function to get auth headers
+function getAuthHeaders() {
+  if (supervisorToken) {
+    return {
+      Authorization: `Bearer ${supervisorToken}`,
+      'Content-Type': 'application/json',
+    };
+  } else {
+    return {
+      'Content-Type': 'application/json',
+    };
+  }
+}
+
 // API for HA media players
 app.get('/api/media_players', async (req, res) => {
   try {
+    if (!supervisorToken) {
+      // Return just the default media player without API call
+      return res.json([{
+        entity_id: defaultMediaPlayer,
+        name: 'Default Media Player (Slaapkamer)',
+        state: 'idle'
+      }]);
+    }
+    
     const haResponse = await axiosInstance.get('http://supervisor/core/api/states', {
-      headers: {
-        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(),
     });
     
     const mediaPlayers = haResponse.data
@@ -61,7 +84,12 @@ app.get('/api/media_players', async (req, res) => {
     res.json(mediaPlayers);
   } catch (error) {
     console.error('Error fetching media players:', error);
-    res.status(500).json({ error: 'Failed to fetch media players', details: error.message });
+    // Return just the default media player on error
+    res.json([{
+      entity_id: defaultMediaPlayer,
+      name: 'Default Media Player (Slaapkamer)',
+      state: 'idle'
+    }]);
   }
 });
 
@@ -157,14 +185,15 @@ app.post('/api/media_control', async (req, res) => {
     
     const service = serviceMap[action];
     
-    await axiosInstance.post(`http://supervisor/core/api/services/media_player/${service}`, {
-      entity_id
-    }, {
-      headers: {
-        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    if (supervisorToken) {
+      await axiosInstance.post(`http://supervisor/core/api/services/media_player/${service}`, {
+        entity_id
+      }, {
+        headers: getAuthHeaders(),
+      });
+    } else {
+      console.log(`Simulated ${action} command to ${entity_id} (no supervisor token)`);
+    }
     
     res.json({ success: true });
   } catch (error) {
@@ -212,12 +241,13 @@ async function playAudioOnHomeAssistant(entity_id, url, title, artist) {
     };
   }
   
-  await axiosInstance.post('http://supervisor/core/api/services/media_player/play_media', playData, {
-    headers: {
-      Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  if (supervisorToken) {
+    await axiosInstance.post('http://supervisor/core/api/services/media_player/play_media', playData, {
+      headers: getAuthHeaders(),
+    });
+  } else {
+    console.log(`Simulated play audio on ${entity_id} (no supervisor token): ${title}`);
+  }
   
   // Create/update media entity in Home Assistant
   await createOrUpdateMediaEntity();
@@ -225,14 +255,15 @@ async function playAudioOnHomeAssistant(entity_id, url, title, artist) {
 
 // Helper function to stop audio on Home Assistant
 async function stopAudioOnHomeAssistant(entity_id) {
-  await axiosInstance.post('http://supervisor/core/api/services/media_player/media_stop', {
-    entity_id
-  }, {
-    headers: {
-      Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  if (supervisorToken) {
+    await axiosInstance.post('http://supervisor/core/api/services/media_player/media_stop', {
+      entity_id
+    }, {
+      headers: getAuthHeaders(),
+    });
+  } else {
+    console.log(`Simulated stop audio on ${entity_id} (no supervisor token)`);
+  }
   
   // Update media entity state
   await createOrUpdateMediaEntity(false);
@@ -240,15 +271,16 @@ async function stopAudioOnHomeAssistant(entity_id) {
 
 // Helper function to set volume on Home Assistant
 async function setVolumeOnHomeAssistant(entity_id, volume) {
-  await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
-    entity_id,
-    volume_level: volume
-  }, {
-    headers: {
-      Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  if (supervisorToken) {
+    await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
+      entity_id,
+      volume_level: volume
+    }, {
+      headers: getAuthHeaders(),
+    });
+  } else {
+    console.log(`Simulated set volume on ${entity_id} to ${volume} (no supervisor token)`);
+  }
 }
 
 // Helper function to create or update a media entity in Home Assistant
@@ -274,14 +306,14 @@ async function createOrUpdateMediaEntity(is_playing = true) {
       }
     };
     
-    await axiosInstance.post(`http://supervisor/core/api/states/${entityId}`, entityData, {
-      headers: {
-        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
-    
-    console.log(`Updated media entity ${entityId} with state: ${state}`);
+    if (supervisorToken) {
+      await axiosInstance.post(`http://supervisor/core/api/states/${entityId}`, entityData, {
+        headers: getAuthHeaders(),
+      });
+      console.log(`Updated media entity ${entityId} with state: ${state}`);
+    } else {
+      console.log(`Simulated update of media entity ${entityId} with state: ${state} (no supervisor token)`);
+    }
   } catch (error) {
     console.error('Error creating/updating media entity:', error);
   }
@@ -384,9 +416,4 @@ app.listen(port, () => {
   createOrUpdateMediaEntity(false);
   
   console.log('Audio capture system initialized');
-  if (defaultMediaPlayer) {
-    console.log(`Default media player set to: ${defaultMediaPlayer}`);
-  } else {
-    console.log('No default media player set');
-  }
 }); 

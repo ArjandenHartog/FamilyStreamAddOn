@@ -2,7 +2,7 @@
 
 # Set environment variables
 export SUPERVISOR_TOKEN=$(cat /data/options.json | jq -r '.supervisor_token // empty')
-export DEFAULT_MEDIA_PLAYER=$(cat /data/options.json | jq -r '.default_media_player // empty')
+export DEFAULT_MEDIA_PLAYER="media_player.slaapkamer"
 
 # Make audio capture script executable
 chmod +x /app/audio_capture.sh
