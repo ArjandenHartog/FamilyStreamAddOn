@@ -1,17 +1,32 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.16
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:bullseye
 FROM ${BUILD_FROM}
 
 # Set shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install packages
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
     ffmpeg \
     curl \
-    bash \
-    jq
+    jq \
+    dbus-x11 \
+    xvfb \
+    x11vnc \
+    firefox-esr \
+    pulseaudio \
+    alsa-utils \
+    pulseaudio-utils \
+    supervisor \
+    dbus \
+    libnss3-tools \
+    libpulse0 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create necessary directories
+RUN mkdir -p /tmp/pulse /config
 
 # Create working directory
 WORKDIR /app
@@ -25,6 +40,7 @@ RUN cd /app && npm install
 # Copy configuration files
 COPY config.yaml /
 COPY run.sh /
+COPY supervisord.conf /etc/supervisor/conf.d/
 
 # Make scripts executable
 RUN chmod +x /run.sh
@@ -32,9 +48,11 @@ RUN chmod +x /run.sh
 # Set environment variables
 ENV NODE_ENV=production
 ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+ENV DISPLAY=:99
+ENV PULSE_SERVER=unix:/tmp/pulse/native
 
 # Expose port
 EXPOSE 8099
 
 # Set entrypoint
-CMD [ "/run.sh" ] 
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"] 

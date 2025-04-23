@@ -11,6 +11,15 @@ const app = express();
 const port = process.env.PORT || 8099;
 const defaultMediaPlayer = process.env.DEFAULT_MEDIA_PLAYER || '';
 
+// Audio stream state
+let currentAudioState = {
+  is_playing: false,
+  stream_url: '',
+  title: 'FamilyStream Audio',
+  artist: 'FamilyStream',
+  entity_id: defaultMediaPlayer
+};
+
 // Create axios instance with SSL verification disabled
 const axiosInstance = axios.create({
   httpsAgent: new https.Agent({  
@@ -56,6 +65,39 @@ app.get('/api/media_players', async (req, res) => {
   }
 });
 
+// Endpoint to receive notification about audio stream
+app.post('/api/notify_audio_stream', async (req, res) => {
+  try {
+    const { stream_url, title, artist, is_playing } = req.body;
+    
+    // Update current audio state
+    if (stream_url) currentAudioState.stream_url = stream_url;
+    if (title) currentAudioState.title = title;
+    if (artist) currentAudioState.artist = artist || 'FamilyStream';
+    currentAudioState.is_playing = is_playing;
+    
+    // If we have a default media player and stream is playing, send to Home Assistant
+    if (defaultMediaPlayer && is_playing && stream_url) {
+      await playAudioOnHomeAssistant(defaultMediaPlayer, stream_url, title, artist);
+      console.log(`Sent audio stream to ${defaultMediaPlayer}: ${title}`);
+    } else if (defaultMediaPlayer && !is_playing) {
+      // Stop playback if audio stopped
+      await stopAudioOnHomeAssistant(defaultMediaPlayer);
+      console.log(`Stopped audio on ${defaultMediaPlayer}`);
+    }
+    
+    res.json({ success: true, current_state: currentAudioState });
+  } catch (error) {
+    console.error('Error handling audio stream notification:', error);
+    res.status(500).json({ error: 'Failed to handle audio stream', details: error.message });
+  }
+});
+
+// Endpoint to get current audio state
+app.get('/api/audio_state', (req, res) => {
+  res.json(currentAudioState);
+});
+
 // Endpoint to play media on a Home Assistant player
 app.post('/api/play', async (req, res) => {
   try {
@@ -65,39 +107,17 @@ app.post('/api/play', async (req, res) => {
       return res.status(400).json({ error: 'Media player entity ID is required' });
     }
     
-    console.log(`Playing "${title}" by "${artist}" on ${entity_id} with URL: ${url}`);
+    // Update current audio state with new target entity
+    currentAudioState.entity_id = entity_id;
     
-    const playData = {
-      entity_id,
-      media_content_id: url,
-      media_content_type: 'music',
-    };
-    
-    if (title) {
-      playData.metadata = {
-        title,
-        artist: artist || 'FamilyStream',
-      };
+    if (url) {
+      await playAudioOnHomeAssistant(entity_id, url, title, artist);
+      console.log(`Playing "${title}" by "${artist}" on ${entity_id} with URL: ${url}`);
     }
-    
-    await axiosInstance.post('http://supervisor/core/api/services/media_player/play_media', playData, {
-      headers: {
-        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
     
     // Set volume if provided
     if (volume !== undefined) {
-      await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
-        entity_id,
-        volume_level: volume
-      }, {
-        headers: {
-          Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      await setVolumeOnHomeAssistant(entity_id, volume);
     }
     
     res.json({ success: true });
@@ -121,6 +141,12 @@ app.post('/api/media_control', async (req, res) => {
     }
     
     console.log(`Sending ${action} command to ${entity_id}`);
+    
+    // Update current audio state
+    currentAudioState.entity_id = entity_id;
+    if (action === 'stop') {
+      currentAudioState.is_playing = false;
+    }
     
     // Map actions to Home Assistant services
     const serviceMap = {
@@ -160,17 +186,8 @@ app.post('/api/volume', async (req, res) => {
       return res.status(400).json({ error: 'Volume must be a value between 0 and 1' });
     }
     
+    await setVolumeOnHomeAssistant(entity_id, volume);
     console.log(`Setting volume to ${volume} on ${entity_id}`);
-    
-    await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
-      entity_id,
-      volume_level: volume
-    }, {
-      headers: {
-        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-    });
     
     res.json({ success: true });
   } catch (error) {
@@ -178,6 +195,97 @@ app.post('/api/volume', async (req, res) => {
     res.status(500).json({ error: 'Failed to set volume', details: error.message });
   }
 });
+
+// Helper function to play audio on Home Assistant
+async function playAudioOnHomeAssistant(entity_id, url, title, artist) {
+  const playData = {
+    entity_id,
+    media_content_id: url,
+    media_content_type: 'music',
+  };
+  
+  if (title) {
+    playData.metadata = {
+      title,
+      artist: artist || 'FamilyStream',
+      media_class: 'music',
+    };
+  }
+  
+  await axiosInstance.post('http://supervisor/core/api/services/media_player/play_media', playData, {
+    headers: {
+      Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  // Create/update media entity in Home Assistant
+  await createOrUpdateMediaEntity();
+}
+
+// Helper function to stop audio on Home Assistant
+async function stopAudioOnHomeAssistant(entity_id) {
+  await axiosInstance.post('http://supervisor/core/api/services/media_player/media_stop', {
+    entity_id
+  }, {
+    headers: {
+      Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  
+  // Update media entity state
+  await createOrUpdateMediaEntity(false);
+}
+
+// Helper function to set volume on Home Assistant
+async function setVolumeOnHomeAssistant(entity_id, volume) {
+  await axiosInstance.post('http://supervisor/core/api/services/media_player/volume_set', {
+    entity_id,
+    volume_level: volume
+  }, {
+    headers: {
+      Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+// Helper function to create or update a media entity in Home Assistant
+async function createOrUpdateMediaEntity(is_playing = true) {
+  try {
+    const entityId = 'media_player.familystream_audio';
+    const state = is_playing ? 'playing' : 'idle';
+    
+    const entityData = {
+      state: state,
+      attributes: {
+        friendly_name: 'FamilyStream Audio',
+        source: 'FamilyStream',
+        media_title: currentAudioState.title,
+        media_artist: currentAudioState.artist,
+        media_content_id: currentAudioState.stream_url,
+        media_content_type: 'music',
+        supported_features: 20753, // Standard media player features
+        device_class: 'speaker',
+        icon: 'mdi:cast-audio',
+        volume_level: 1.0,
+        is_volume_muted: false,
+      }
+    };
+    
+    await axiosInstance.post(`http://supervisor/core/api/states/${entityId}`, entityData, {
+      headers: {
+        Authorization: `Bearer ${process.env.SUPERVISOR_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    console.log(`Updated media entity ${entityId} with state: ${state}`);
+  } catch (error) {
+    console.error('Error creating/updating media entity:', error);
+  }
+}
 
 // Helper page for the floating controls
 app.get('/controls', (req, res) => {
@@ -220,12 +328,31 @@ app.use('/', createProxyMiddleware({
                 });
                 
                 // Intercept audio elements to add Home Assistant controls
-                document.addEventListener('play', function(e) {
-                  if (e.target.tagName === 'AUDIO') {
-                    console.log('Audio playing:', e.target.src);
-                    // Optionally can add code to intercept audio source
-                  }
-                }, true);
+                const originalAudioPlay = Audio.prototype.play;
+                Audio.prototype.play = function() {
+                  console.log('Audio playing:', this.src);
+                  fetch('/api/notify_audio_stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      stream_url: 'http://localhost:8081',
+                      title: 'FamilyStream Audio',
+                      is_playing: true
+                    })
+                  });
+                  return originalAudioPlay.apply(this);
+                };
+                
+                const originalAudioPause = Audio.prototype.pause;
+                Audio.prototype.pause = function() {
+                  console.log('Audio paused');
+                  fetch('/api/notify_audio_stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_playing: false })
+                  });
+                  return originalAudioPause.apply(this);
+                };
               </script>
             </div>
           `;
@@ -242,7 +369,7 @@ app.use('/', createProxyMiddleware({
     '^/': '/'
   },
   headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/91.0',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Language': 'nl,en-US;q=0.7,en;q=0.3',
     'Referer': 'https://web.familystream.com/'
@@ -250,6 +377,16 @@ app.use('/', createProxyMiddleware({
 }));
 
 // Start the server
-app.listen(port, '0.0.0.0', () => {
-  console.log(`FamilyStream add-on running on port ${port}`);
+app.listen(port, () => {
+  console.log(`FamilyStream Firefox add-on running on port ${port}`);
+  
+  // Create initial media entity
+  createOrUpdateMediaEntity(false);
+  
+  console.log('Audio capture system initialized');
+  if (defaultMediaPlayer) {
+    console.log(`Default media player set to: ${defaultMediaPlayer}`);
+  } else {
+    console.log('No default media player set');
+  }
 }); 

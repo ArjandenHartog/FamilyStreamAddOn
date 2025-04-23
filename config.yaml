@@ -1,7 +1,7 @@
-name: "FamilyStream"
-description: "FamilyStream Browser met audio doorsturen naar Home Assistant mediaspelers"
-version: "3.0.0"
-slug: "familystream"
+name: "FamilyStream Firefox Kiosk"
+description: "FamilyStream in Firefox kiosk mode with audio forwarding to Home Assistant media players"
+version: "4.0.0"
+slug: "familystream_firefox"
 init: false
 arch:
   - aarch64
@@ -19,6 +19,8 @@ auth_api: true
 homeassistant_api: true
 host_network: true
 audio: true
+devices:
+  - /dev/snd
 options:
   default_media_player: ""
   supervisor_token: ""
