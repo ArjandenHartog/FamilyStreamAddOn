@@ -10,5 +10,5 @@ chmod +x /app/audio_capture.sh
 echo "Starting FamilyStream Firefox add-on..."
 echo "Default media player: ${DEFAULT_MEDIA_PLAYER}"
 
-# Start supervisord
-exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf 
+# Start supervisord with environment variables passed through
+exec env SUPERVISOR_TOKEN=$SUPERVISOR_TOKEN DEFAULT_MEDIA_PLAYER=$DEFAULT_MEDIA_PLAYER /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf 
