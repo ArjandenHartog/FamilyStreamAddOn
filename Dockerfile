@@ -40,10 +40,11 @@ RUN cd /app && npm install
 # Copy configuration files
 COPY config.yaml /
 COPY run.sh /
+COPY start_services.sh /
 COPY supervisord.conf /etc/supervisor/conf.d/
 
 # Make scripts executable
-RUN chmod +x /run.sh
+RUN chmod +x /run.sh /start_services.sh
 
 # Set environment variables
 ENV NODE_ENV=production
@@ -53,6 +54,7 @@ ENV PULSE_SERVER=unix:/tmp/pulse/native
 
 # Expose port
 EXPOSE 8099
+EXPOSE 5900
 
 # Set entrypoint
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"] 
+CMD ["/run.sh"] 
