@@ -6,8 +6,29 @@ export DEFAULT_MEDIA_PLAYER="media_player.slaapkamer"
 export DISPLAY=":99"
 export PULSE_SERVER="unix:/tmp/pulse/native"
 
-# Make audio capture script executable
+# Ensure script files are executable
+chmod +x /start_dbus.sh
+chmod +x /start_pulseaudio.sh
 chmod +x /app/audio_capture.sh
+chmod +x /start_services.sh
+
+# Create necessary directories with proper permissions (backup method)
+mkdir -p /run/dbus
+mkdir -p /var/run/dbus
+mkdir -p /var/lib/dbus
+mkdir -p /tmp/pulse
+mkdir -p /var/run/pulse
+mkdir -p /var/run/pulse/.config/pulse
+mkdir -p /root/.config/pulse
+
+# Set permissions
+chmod -R 755 /run/dbus /var/run/dbus
+chmod -R 777 /tmp/pulse /var/run/pulse /root/.config/pulse
+
+# Try to set ownership if the messagebus user exists
+if getent passwd messagebus >/dev/null; then
+  chown -R messagebus:messagebus /run/dbus /var/run/dbus /var/lib/dbus
+fi
 
 echo "Starting FamilyStream Firefox add-on..."
 echo "Default media player: ${DEFAULT_MEDIA_PLAYER}"

@@ -324,20 +324,41 @@ app.get('/controls', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'controls.html'));
 });
 
+// Flag to ensure we only inject our script once per response
+let injectedResponses = new Set();
+
 // Proxy all other requests to web.familystream.com
-app.use('/', createProxyMiddleware({
+const proxy = createProxyMiddleware({
   target: 'https://web.familystream.com',
   changeOrigin: true,
   secure: false,
   ws: true,
+  hostRewrite: 'web.familystream.com',
+  cookieDomainRewrite: '',
+  autoRewrite: true,
+  headers: {
+    'Host': 'web.familystream.com',
+    'Origin': 'https://web.familystream.com',
+    'Referer': 'https://web.familystream.com/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/91.0',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'nl,en-US;q=0.7,en;q=0.3'
+  },
   onProxyReq: (proxyReq, req, res) => {
-    // Add cookie handling if needed
+    // Modify host header
+    proxyReq.setHeader('Host', 'web.familystream.com');
+    proxyReq.setHeader('Origin', 'https://web.familystream.com');
+    
     console.log(`Proxying request to: ${req.url}`);
   },
   onProxyRes: (proxyRes, req, res) => {
-    // Add script to page for HA audio controls
+    // Add script to page for HA audio controls (but only for HTML pages)
     if (proxyRes.headers['content-type'] && proxyRes.headers['content-type'].includes('text/html')) {
       delete proxyRes.headers['content-length'];
+      
+      // Generate unique ID for this response
+      const responseId = Date.now().toString();
+      injectedResponses.add(responseId);
       
       const _write = res.write;
       let body = '';
@@ -347,7 +368,10 @@ app.use('/', createProxyMiddleware({
           body += data.toString('utf8');
         }
         
-        if (body.includes('</body>')) {
+        if (body.includes('</body>') && injectedResponses.has(responseId)) {
+          // Remove this response ID from the set to prevent double injection
+          injectedResponses.delete(responseId);
+          
           // Add our floating controls before the end of body
           const script = `
             <div id="ha-audio-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 5px; color: white;">
@@ -355,39 +379,50 @@ app.use('/', createProxyMiddleware({
                 HA Audio Controls
               </button>
               <script>
-                document.getElementById('ha-open-controls').addEventListener('click', function() {
-                  window.open('/controls', 'ha_controls', 'width=400,height=600');
-                });
-                
-                // Intercept audio elements to add Home Assistant controls
-                const originalAudioPlay = Audio.prototype.play;
-                Audio.prototype.play = function() {
-                  console.log('Audio playing:', this.src);
-                  fetch('/api/notify_audio_stream', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      stream_url: 'http://localhost:8081',
-                      title: 'FamilyStream Audio',
-                      is_playing: true
-                    })
+                // Only add event listener if element exists and hasn't been set up yet
+                if (document.getElementById('ha-open-controls') && !document.getElementById('ha-open-controls').hasAttribute('data-initialized')) {
+                  document.getElementById('ha-open-controls').setAttribute('data-initialized', 'true');
+                  document.getElementById('ha-open-controls').addEventListener('click', function() {
+                    window.open('/controls', 'ha_controls', 'width=400,height=600');
                   });
-                  return originalAudioPlay.apply(this);
-                };
                 
-                const originalAudioPause = Audio.prototype.pause;
-                Audio.prototype.pause = function() {
-                  console.log('Audio paused');
-                  fetch('/api/notify_audio_stream', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ is_playing: false })
-                  });
-                  return originalAudioPause.apply(this);
-                };
+                  // Only patch audio if not already patched
+                  if (!window.haAudioPatched) {
+                    window.haAudioPatched = true;
+                    const originalAudioPlay = Audio.prototype.play;
+                    Audio.prototype.play = function() {
+                      console.log('Audio playing:', this.src);
+                      fetch('/api/notify_audio_stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          stream_url: 'http://localhost:8081',
+                          title: 'FamilyStream Audio',
+                          is_playing: true
+                        })
+                      });
+                      return originalAudioPlay.apply(this);
+                    };
+                
+                    const originalAudioPause = Audio.prototype.pause;
+                    Audio.prototype.pause = function() {
+                      console.log('Audio paused');
+                      fetch('/api/notify_audio_stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ is_playing: false })
+                      });
+                      return originalAudioPause.apply(this);
+                    };
+                  }
+                }
               </script>
             </div>
           `;
+          
+          // Fix for relative URLs
+          body = body.replace(/href="\//g, 'href="https://web.familystream.com/');
+          body = body.replace(/src="\//g, 'src="https://web.familystream.com/');
           
           body = body.replace('</body>', script + '</body>');
           return _write.call(res, body);
@@ -396,17 +431,34 @@ app.use('/', createProxyMiddleware({
         return _write.call(res, data);
       };
     }
-  },
-  pathRewrite: {
-    '^/': '/'
-  },
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/91.0',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'nl,en-US;q=0.7,en;q=0.3',
-    'Referer': 'https://web.familystream.com/'
+    
+    // Fix URLs in other response types (CSS, JS, etc)
+    if (proxyRes.headers['content-type'] && 
+        (proxyRes.headers['content-type'].includes('text/css') || 
+         proxyRes.headers['content-type'].includes('application/javascript'))) {
+      
+      delete proxyRes.headers['content-length'];
+      
+      const _write = res.write;
+      let body = '';
+      
+      res.write = function(data) {
+        if (data) {
+          body += data.toString('utf8');
+          
+          // Fix relative URLs in CSS and JS files
+          body = body.replace(/url\(['"]?\//g, 'url(\'https://web.familystream.com/');
+          body = body.replace(/src=['"]?\//g, 'src="https://web.familystream.com/');
+          body = body.replace(/href=['"]?\//g, 'href="https://web.familystream.com/');
+        }
+        
+        return _write.call(res, body);
+      };
+    }
   }
-}));
+});
+
+app.use('/', proxy);
 
 // Start the server
 app.listen(port, () => {

@@ -41,10 +41,12 @@ RUN cd /app && npm install
 COPY config.yaml /
 COPY run.sh /
 COPY start_services.sh /
+COPY start_dbus.sh /
+COPY start_pulseaudio.sh /
 COPY supervisord.conf /etc/supervisor/conf.d/
 
 # Make scripts executable
-RUN chmod +x /run.sh /start_services.sh
+RUN chmod +x /run.sh /start_services.sh /start_dbus.sh /start_pulseaudio.sh /app/audio_capture.sh
 
 # Set environment variables
 ENV NODE_ENV=production
