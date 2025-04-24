@@ -1,7 +1,7 @@
-name: "FamilyStream Firefox Kiosk"
-description: "FamilyStream in Firefox kiosk mode with audio forwarding to Home Assistant media players"
-version: "4.0.0"
-slug: "familystream_firefox"
+name: "Firefox with Audio Streaming"
+description: "Firefox browser with audio streaming to Home Assistant media player"
+version: "5.0.0"
+slug: "firefox_audio_streaming"
 init: false
 arch:
   - aarch64
@@ -9,26 +9,20 @@ arch:
   - armhf
   - armv7
   - i386
-startup: application
-boot: auto
-ingress: true
-ingress_port: 8099
-panel_icon: mdi:music
 hassio_api: true
-auth_api: true
-homeassistant_api: true
-host_network: true
-audio: true
-devices:
-  - /dev/snd
-options:
-  default_media_player: "media_player.slaapkamer"
-  supervisor_token: ""
-schema:
-  default_media_player: str
-  supervisor_token: str?
-webui: "http://[HOST]:[PORT:8099]"
+hassio_role: "default"
+webui: "http://[HOST]:[PORT:5800]"
 ports:
-  8099/tcp: 8099
+  5800/tcp: 5800
+  5900/tcp: 5900
 ports_description:
-  8099/tcp: "Web interface (Not required for Ingress)" 
+  5800/tcp: "Web interface (Not required for Ingress)"
+  5900/tcp: "VNC connection (Not required for Ingress)"
+ingress: true
+ingress_port: 5800
+panel_icon: "mdi:firefox"
+panel_title: "Firefox Media"
+options:
+  media_player: ""
+schema:
+  media_player: "str" 

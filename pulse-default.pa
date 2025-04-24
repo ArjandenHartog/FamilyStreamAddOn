@@ -1,0 +1,18 @@
+#!/usr/bin/pulseaudio -nF
+
+# Load system protocol
+load-module module-native-protocol-unix socket=/tmp/pulseaudio.socket auth-anonymous=1
+
+# Load audio drivers
+load-module module-alsa-sink
+load-module module-alsa-source device=default
+load-module module-null-sink sink_name=rtp
+load-module module-rtp-send source=rtp.monitor
+
+# Virtual audio source for browser audio capture
+load-module module-null-sink sink_name=stream
+load-module module-loopback source=stream.monitor
+
+# Set default sink and source
+set-default-sink stream
+set-default-source stream.monitor 

@@ -1,32 +1,51 @@
-# FamilyStream Firefox Kiosk for Home Assistant
+# Firefox with Audio Streaming
 
-This add-on provides a complete Firefox kiosk solution for FamilyStream with audio capture and integration with Home Assistant's media player system. It creates a dedicated media entity that can be used in automations and dashboards.
+## Home Assistant Add-on for Firefox with Audio Streaming to Media Player
+
+This Home Assistant add-on provides a Firefox browser instance with audio streaming capabilities. The audio from Firefox is captured and automatically streamed to a configured Home Assistant media player entity.
 
 ## Features
 
-- Firefox browser running in kiosk mode for FamilyStream
-- Audio capture from the browser with ffmpeg
-- Dedicated media player entity in Home Assistant
-- Stream audio to any Home Assistant media player
-- Control volume and playback through Home Assistant
-- Web-based control interface
-- VNC access for troubleshooting (port 5900)
-
-## Technical Details
-
-- Uses Firefox ESR in kiosk mode on a Debian base
-- PulseAudio for audio routing
-- Virtual audio devices to capture browser audio
-- FFmpeg for audio streaming via HTTP
-- Node.js server for proxying and controlling the system
+- Full Firefox browser experience within Home Assistant
+- Audio capture and streaming to any Home Assistant media player
+- Easy configuration with a single setting
+- Available through Ingress for seamless Home Assistant integration
+- Based on the official Firefox browser
 
 ## Installation
 
-1. Add this repository URL to your Home Assistant add-on store
-2. Install the "FamilyStream Firefox Kiosk" add-on
-3. Configure the add-on with your preferences
-4. Start the add-on and access it through the sidebar
+1. Add this repository to your Home Assistant instance
+2. Install the "Firefox with Audio Streaming" add-on
+3. Configure the media player entity for audio output
+4. Start the add-on
 
 ## Configuration
 
-See the [Documentation](DOCS.md) for detailed configuration options and usage instructions. 
+The add-on requires minimal configuration:
+
+```yaml
+media_player: "your_media_player"  # The media_player entity to send audio to (without the media_player. prefix)
+```
+
+### Options
+
+#### Option: `media_player`
+
+The media player entity ID to which the Firefox audio will be streamed. This should be just the entity ID without the `media_player.` prefix.
+
+For example, if your media player is `media_player.living_room_speaker`, enter `living_room_speaker`.
+
+## How it works
+
+1. The add-on starts a Firefox browser in a Docker container
+2. PulseAudio is configured to capture all audio from Firefox
+3. FFmpeg captures the audio and streams it to your configured media player
+4. You can access Firefox through the Home Assistant interface
+
+## Support
+
+For issues with this add-on, please open an issue on GitHub.
+
+## License
+
+MIT License 
